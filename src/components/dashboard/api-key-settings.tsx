@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useForm } from "react-hook-form"
 import {
   Check,
   Eye,
@@ -16,7 +15,14 @@ import {
 } from "lucide-react"
 
 import { maskKey } from "@/lib/api-keys"
-import { friendlyApiError, testGeminiConnection } from "@/lib/generate"
+import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  friendlyApiError,
+  testGeminiConnection,
+  testOpenAIConnection,
+} from "@/lib/generate"
+import type { ApiProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,91 +33,131 @@ import { Switch } from "@/components/ui/switch"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 
-const MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-];
-
-type FormValues = {
-  key: string;
-  model: string;
-};
-
 type ConnStatus = "idle" | "testing" | "connected" | "failed";
 
 export function ApiKeySettings() {
+  return (
+    <div className="flex flex-col gap-5">
+      <ProviderKeys
+        provider="gemini"
+        title="Gemini API Keys"
+        placeholder="AIza… (paste Gemini key)"
+        models={GEMINI_MODELS}
+      />
+      <div className="h-px bg-border" />
+      <ProviderKeys
+        provider="openai"
+        title="OpenAI API Keys"
+        placeholder="sk-… (paste OpenAI key)"
+        models={OPENAI_MODELS}
+      />
+
+      <p className="text-xs text-muted-foreground">
+        Keys are saved in browser localStorage and loaded automatically. Gemini
+        is used first; if every Gemini key is rate-limited or exhausted, the
+        queue switches to OpenAI automatically and continues without losing
+        progress. If no active keys are added, a local engine generates results
+        on-device.
+      </p>
+    </div>
+  );
+}
+
+function ProviderKeys({
+  provider,
+  title,
+  placeholder,
+  models,
+}: {
+  provider: ApiProvider;
+  title: string;
+  placeholder: string;
+  models: string[];
+}) {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const addApiKey = useAppStore((state) => state.addApiKey);
   const updateApiKey = useAppStore((state) => state.updateApiKey);
   const removeApiKey = useAppStore((state) => state.removeApiKey);
-  const setModel = useAppStore((state) => state.setModel);
+  const selectedModel = useAppStore(
+    (state) => (provider === "gemini" ? state.model : state.openaiModel)
+  );
+  const setSelectedModel = useAppStore((state) =>
+    provider === "gemini" ? state.setModel : state.setOpenaiModel
+  );
+
+  const providerKeys = apiKeys.filter((entry) => entry.provider === provider);
+
   const [visible, setVisible] = useState(false);
   const [status, setStatus] = useState<ConnStatus>("idle");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modelCount, setModelCount] = useState(0);
+  const [keyValue, setKeyValue] = useState("");
 
-  const { register, handleSubmit, watch, reset } = useForm<FormValues>({
-    defaultValues: { key: "", model: useAppStore.getState().model },
-  });
-  const watchedKey = watch("key");
+  const clearForm = () => {
+    setKeyValue("");
+    setVisible(false);
+    setStatus("idle");
+    setEditingId(null);
+  };
 
-  const saveKey = (values: FormValues) => {
-    const trimmed = values.key.trim();
-    setModel(values.model);
+  const saveKey = () => {
+    const trimmed = keyValue.trim();
     if (editingId) {
-      if (trimmed) {
-        updateApiKey(editingId, { key: trimmed });
-        toast("success", "Key updated");
-      } else {
-        toast("info", "No changes", "Paste a new key to replace the current one.");
-      }
-      setEditingId(null);
-    } else {
       if (!trimmed) {
-        toast("error", "Enter a key first", "Paste your Gemini API key to add it.");
+        toast("info", "No changes", "Paste a new key to replace the current one.");
         return;
       }
-      addApiKey({ id: crypto.randomUUID(), key: trimmed, enabled: true });
+      updateApiKey(editingId, { key: trimmed });
+      toast("success", "Key updated");
+    } else {
+      if (!trimmed) {
+        toast("error", "Enter a key first", `Paste your ${title} API key to add it.`);
+        return;
+      }
+      addApiKey({
+        id: crypto.randomUUID(),
+        provider,
+        key: trimmed,
+        enabled: true,
+      });
       toast("success", "Key added");
     }
-    setStatus("idle");
-    reset({ key: "", model: values.model });
+    clearForm();
   };
 
   const startEdit = (id: string) => {
     setEditingId(id);
     setStatus("idle");
-    reset({ key: "", model: useAppStore.getState().model });
-  };
-
-  const cancelEdit = () => {
-    setEditingId(null);
-    setStatus("idle");
-    reset({ key: "", model: useAppStore.getState().model });
+    setKeyValue("");
   };
 
   const testConnection = async () => {
-    const key = watchedKey.trim();
-    if (!key) {
-      toast("error", "Enter a key first", "Paste your Gemini API key to test it.");
+    const trimmed = keyValue.trim();
+    if (!trimmed) {
+      toast("error", "Enter a key first", `Paste your ${title} API key to test it.`);
       return;
     }
 
     setStatus("testing");
     try {
-      const count = await testGeminiConnection(key);
+      const count =
+        provider === "gemini"
+          ? await testGeminiConnection(trimmed)
+          : await testOpenAIConnection(trimmed);
       setModelCount(count);
       setStatus("connected");
       if (editingId) {
-        updateApiKey(editingId, { key });
-        setEditingId(null);
+        updateApiKey(editingId, { key: trimmed });
       } else {
-        addApiKey({ id: crypto.randomUUID(), key, enabled: true });
+        addApiKey({
+          id: crypto.randomUUID(),
+          provider,
+          key: trimmed,
+          enabled: true,
+        });
       }
       toast("success", "Connection successful", `${count} models available.`);
-      reset({ key: "", model: useAppStore.getState().model });
+      clearForm();
     } catch (error) {
       setStatus("failed");
       toast("error", "Connection failed", friendlyApiError(error));
@@ -120,13 +166,24 @@ export function ApiKeySettings() {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold tracking-tight">{title}</p>
+        {provider === "gemini" ? (
+          <span className="text-xs text-muted-foreground">Primary</span>
+        ) : (
+          <Badge variant="outline" className="text-xs">
+            Fallback
+          </Badge>
+        )}
+      </div>
+
       <div className="flex flex-col gap-2">
         <Label>API keys</Label>
-        {apiKeys.length === 0 ? (
+        {providerKeys.length === 0 ? (
           <p className="text-xs text-muted-foreground">No keys added yet.</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {apiKeys.map((entry) => (
+            {providerKeys.map((entry) => (
               <li
                 key={entry.id}
                 className={cn(
@@ -174,10 +231,10 @@ export function ApiKeySettings() {
         )}
       </div>
 
-      <form onSubmit={handleSubmit(saveKey)} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <Label htmlFor="api-key">
+            <Label htmlFor={`api-key-${provider}`}>
               {editingId ? "Replace API key" : "New API key"}
             </Label>
             {status !== "idle" ? (
@@ -209,11 +266,12 @@ export function ApiKeySettings() {
           </div>
           <div className="relative">
             <Input
-              id="api-key"
+              id={`api-key-${provider}`}
               type={visible ? "text" : "password"}
-              placeholder={editingId ? "AIza… (paste new key)" : "AIza…"}
+              placeholder={placeholder}
               className="pr-9 font-mono"
-              {...register("key")}
+              value={keyValue}
+              onChange={(event) => setKeyValue(event.target.value)}
             />
             <button
               type="button"
@@ -227,9 +285,13 @@ export function ApiKeySettings() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="model">Model</Label>
-          <Select id="model" {...register("model")}>
-            {MODELS.map((option) => (
+          <Label htmlFor={`model-${provider}`}>Model</Label>
+          <Select
+            id={`model-${provider}`}
+            value={selectedModel}
+            onChange={(event) => setSelectedModel(event.target.value)}
+          >
+            {models.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -238,7 +300,7 @@ export function ApiKeySettings() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" variant="outline" size="sm">
+          <Button type="button" variant="outline" size="sm" onClick={saveKey}>
             {editingId ? <Pencil /> : <Plus />}
             {editingId ? "Save key" : "Add key"}
           </Button>
@@ -246,27 +308,20 @@ export function ApiKeySettings() {
             type="button"
             variant="default"
             size="sm"
-            disabled={status === "testing" || !watchedKey.trim()}
+            disabled={status === "testing" || !keyValue.trim()}
             onClick={testConnection}
           >
             {status === "testing" ? <Loader2 className="animate-spin" /> : <Zap />}
             Test connection
           </Button>
           {editingId ? (
-            <Button type="button" variant="ghost" size="sm" onClick={cancelEdit}>
+            <Button type="button" variant="ghost" size="sm" onClick={clearForm}>
               <X />
               Cancel
             </Button>
           ) : null}
         </div>
-      </form>
-
-      <p className="text-xs text-muted-foreground">
-        Keys are saved in browser localStorage and loaded automatically. Requests
-        use the first active key, then rotate across keys on quota, rate-limit, or
-        invalid-key errors. If no active key is available the queue pauses. When
-        no keys are added, a local engine generates results on-device.
-      </p>
+      </div>
     </div>
   );
 }

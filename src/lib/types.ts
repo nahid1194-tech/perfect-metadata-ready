@@ -54,8 +54,11 @@ export type QueueItem = {
   startedAt?: number;
 };
 
+export type ApiProvider = "gemini" | "openai";
+
 export type ApiKeyEntry = {
   id: string;
+  provider: ApiProvider;
   key: string;
   enabled: boolean;
 };

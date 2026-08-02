@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 
 import type {
   ApiKeyEntry,
+  ApiProvider,
   GenerationResult,
   GenerationSettings,
   ImageAsset,
@@ -31,6 +32,7 @@ type AppState = {
   theme: Theme;
   apiKeys: ApiKeyEntry[];
   model: string;
+  openaiModel: string;
   images: ImageAsset[];
   selectedIds: string[];
   results: GenerationResult[];
@@ -51,6 +53,7 @@ type AppState = {
   updateApiKey: (id: string, patch: Partial<Omit<ApiKeyEntry, "id">>) => void;
   removeApiKey: (id: string) => void;
   setModel: (model: string) => void;
+  setOpenaiModel: (model: string) => void;
   setSettings: (patch: Partial<GenerationSettings>) => void;
   addImages: (images: ImageAsset[]) => void;
   updateImage: (id: string, patch: Partial<ImageAsset>) => void;
@@ -81,15 +84,19 @@ type AppState = {
   resultCache: Record<string, GenerationResult>;
   setResultCache: (key: string, result: GenerationResult) => void;
   debugStatus: {
+    activeProvider: ApiProvider | null;
     activeKeyIndex: number | null;
     activeKeyCount: number;
     activeModel: string | null;
+    activeKeyMasked: string | null;
   };
   setDebugStatus: (
     patch: Partial<{
+      activeProvider: ApiProvider | null;
       activeKeyIndex: number | null;
       activeKeyCount: number;
       activeModel: string | null;
+      activeKeyMasked: string | null;
     }>
   ) => void;
 };
@@ -100,6 +107,7 @@ export const useAppStore = create<AppState>()(
       theme: "light",
       apiKeys: [],
       model: "gemini-2.5-flash",
+      openaiModel: "gpt-4o",
       images: [],
       selectedIds: [],
       results: [],
@@ -129,6 +137,7 @@ export const useAppStore = create<AppState>()(
           apiKeys: state.apiKeys.filter((entry) => entry.id !== id),
         })),
       setModel: (model) => set({ model }),
+      setOpenaiModel: (openaiModel) => set({ openaiModel }),
       setSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
       addImages: (images) =>
@@ -228,7 +237,13 @@ export const useAppStore = create<AppState>()(
           }
           return { resultCache: next };
         }),
-      debugStatus: { activeKeyIndex: null, activeKeyCount: 0, activeModel: null },
+      debugStatus: {
+        activeProvider: null,
+        activeKeyIndex: null,
+        activeKeyCount: 0,
+        activeModel: null,
+        activeKeyMasked: null,
+      },
       setDebugStatus: (patch) =>
         set((state) => ({ debugStatus: { ...state.debugStatus, ...patch } })),
     }),
@@ -238,6 +253,7 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         apiKeys: state.apiKeys,
         model: state.model,
+        openaiModel: state.openaiModel,
         settings: state.settings,
         resultCache: state.resultCache,
       }),
@@ -260,8 +276,26 @@ export const useAppStore = create<AppState>()(
         const legacyKey = persisted?.apiKey?.trim() ?? "";
         if (legacyKey && !Array.isArray(merged.apiKeys)) {
           merged.apiKeys = [
-            { id: crypto.randomUUID(), key: legacyKey, enabled: true },
+            {
+              id: crypto.randomUUID(),
+              provider: "gemini",
+              key: legacyKey,
+              enabled: true,
+            },
           ];
+        }
+        if (Array.isArray(merged.apiKeys)) {
+          merged.apiKeys = merged.apiKeys.map(
+            (entry: ApiKeyEntry): ApiKeyEntry => ({
+              id: entry.id,
+              provider: entry.provider ?? "gemini",
+              key: entry.key,
+              enabled: entry.enabled ?? true,
+            })
+          );
+        }
+        if (typeof merged.openaiModel !== "string" || !merged.openaiModel) {
+          merged.openaiModel = "gpt-4o";
         }
         if (Array.isArray(merged.results)) {
           merged.results = merged.results.map((result: GenerationResult) => ({

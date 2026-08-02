@@ -1,4 +1,4 @@
-import type { ApiKeyEntry } from "@/lib/types";
+import type { ApiKeyEntry, ApiProvider } from "@/lib/types";
 
 export function maskKey(key: string): string {
   const trimmed = key.trim();
@@ -6,8 +6,16 @@ export function maskKey(key: string): string {
   return `${trimmed.slice(0, 4)}********${trimmed.slice(-4)}`;
 }
 
-export function activeKeys(keys: ApiKeyEntry[]): ApiKeyEntry[] {
-  return keys.filter((entry) => entry.enabled && entry.key.trim().length > 0);
+export function activeKeys(
+  keys: ApiKeyEntry[],
+  provider?: ApiProvider
+): ApiKeyEntry[] {
+  return keys.filter(
+    (entry) =>
+      (provider === undefined || entry.provider === provider) &&
+      entry.enabled &&
+      entry.key.trim().length > 0
+  );
 }
 
 type KeyCooldown = {

@@ -9,9 +9,11 @@ import {
 import { resultCacheKey } from "@/lib/cache";
 import {
   GEMINI_MODELS,
+  OPENAI_MODELS,
   friendlyApiError,
   generateLocal,
   generateWithApi,
+  generateWithOpenAI,
   isInvalidImageError,
   isKeyFailure,
   isModelBusy,
@@ -22,6 +24,7 @@ import {
   rateLimitDelayMs,
 } from "@/lib/generate";
 import type {
+  ApiProvider,
   GenerationResult,
   GenerationSettings,
   ImageAsset,
@@ -44,15 +47,45 @@ const IMAGE_DELAY_MIN_MS = 3000;
 const IMAGE_DELAY_MAX_MS = 5000;
 
 function updateDebug(
+  activeProvider: ApiProvider | null,
   activeKeyIndex: number | null,
   activeKeyCount: number,
-  activeModel: string | null
+  activeModel: string | null,
+  activeKeyMasked: string | null
 ): void {
   useAppStore.getState().setDebugStatus({
+    activeProvider,
     activeKeyIndex,
     activeKeyCount,
     activeModel,
+    activeKeyMasked,
   });
+}
+
+function providerLabel(provider: ApiProvider): string {
+  return provider === "gemini" ? "Gemini" : "OpenAI";
+}
+
+let lastProviderSwitchToastAt = 0;
+let lastOpenAiKeySwitchToastAt = 0;
+
+function notifyProviderSwitch(from: ApiProvider, to: ApiProvider): void {
+  const now = Date.now();
+  if (now - lastProviderSwitchToastAt < 15000) return;
+  lastProviderSwitchToastAt = now;
+  const message = `All ${providerLabel(from)} API keys exhausted. Switched to ${providerLabel(to)} automatically.`;
+  console.log(`[Queue] ${message}`);
+  toast("info", "Provider switched", message);
+}
+
+function notifyOpenAiKeySwitch(nextKeyIndex: number): void {
+  if (nextKeyIndex === 0) return;
+  const now = Date.now();
+  if (now - lastOpenAiKeySwitchToastAt < 10000) return;
+  lastOpenAiKeySwitchToastAt = now;
+  const message = `Switched to OpenAI API Key #${nextKeyIndex + 1}.`;
+  console.log(`[Queue] ${message}`);
+  toast("info", "API key switched", message);
 }
 
 function sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
@@ -99,7 +132,13 @@ async function waitForRateLimit(
   const seconds = Math.max(1, Math.round(error.delayMs / 1000));
   const message = `API key rate-limited. Waiting ${seconds} seconds before retrying...`;
   console.log(`[Gemini] All active API keys rate-limited, pausing for ${seconds}s`);
-  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
+  updateDebug(
+    null,
+    null,
+    activeKeys(useAppStore.getState().apiKeys).length,
+    null,
+    null
+  );
   useAppStore.getState().patchQueueItem(image.id, {
     status: "retrying",
     error: null,
@@ -129,22 +168,26 @@ function rebaseCachedResult(
 }
 
 async function generateWithKeys(
+  provider: ApiProvider,
   image: ImageAsset,
   settings: GenerationSettings,
   signal: AbortSignal
 ): Promise<GenerationResult> {
   const store = useAppStore.getState();
-  const keys = activeKeys(store.apiKeys);
+  const keys = activeKeys(store.apiKeys, provider);
   if (keys.length === 0) throw new NoActiveKeyError();
 
   const now = Date.now();
   pruneKeyCooldowns(now);
   const orderedKeys = rotateKeys(keys);
 
-  const models = [
-    store.model,
-    ...GEMINI_MODELS.filter((model) => model !== store.model),
-  ];
+  const models =
+    provider === "gemini"
+      ? [store.model, ...GEMINI_MODELS.filter((model) => model !== store.model)]
+      : [
+          store.openaiModel,
+          ...OPENAI_MODELS.filter((model) => model !== store.openaiModel),
+        ];
 
   let sawRateLimit = false;
   let waitUntil = Infinity;
@@ -161,17 +204,19 @@ async function generateWithKeys(
     }
 
     console.log(
-      `[Gemini] Using API key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)})`
+      `[${provider}] Using API key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)})`
     );
-    updateDebug(keyIndex, keys.length, null);
+    updateDebug(provider, keyIndex, keys.length, null, maskKey(key.key));
 
     for (const model of models) {
-      console.log(`[Gemini] Using model ${model}`);
-      updateDebug(keyIndex, keys.length, model);
+      console.log(`[${provider}] Using model ${model}`);
+      updateDebug(provider, keyIndex, keys.length, model, maskKey(key.key));
       let networkRetries = 0;
       for (;;) {
         try {
-          return await generateWithApi(image, key.key, model, settings, signal);
+          return await (provider === "gemini"
+            ? generateWithApi(image, key.key, model, settings, signal)
+            : generateWithOpenAI(image, key.key, model, settings, signal));
         } catch (error) {
           if (signal.aborted) throw error;
           if (isRateLimited(error)) {
@@ -180,8 +225,9 @@ async function generateWithKeys(
             sawRateLimit = true;
             waitUntil = Math.min(waitUntil, until);
             console.log(
-              `[Gemini] API key ${maskKey(key.key)} rate-limited, switching to the next active key`
+              `[${provider}] API key ${maskKey(key.key)} rate-limited, switching to the next active key`
             );
+            if (provider === "openai") notifyOpenAiKeySwitch(keyIndex + 1);
             continue keyLoop;
           }
           if (isNetworkError(error) && networkRetries < 2) {
@@ -196,6 +242,7 @@ async function generateWithKeys(
           }
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
+            if (provider === "openai") notifyOpenAiKeySwitch(keyIndex + 1);
             continue keyLoop;
           }
           nonRateLimitError ??= error;
@@ -211,6 +258,66 @@ async function generateWithKeys(
   throw nonRateLimitError ?? new NoActiveKeyError();
 }
 
+function isRetryableFailure(error: unknown): boolean {
+  return (
+    error instanceof RateLimitedError ||
+    isRateLimited(error) ||
+    isModelBusy(error) ||
+    isNetworkError(error)
+  );
+}
+
+function retryDelayFor(error: unknown): number {
+  if (error instanceof RateLimitedError) return error.delayMs;
+  return rateLimitDelayMs(error);
+}
+
+async function generateWithProviders(
+  image: ImageAsset,
+  settings: GenerationSettings,
+  signal: AbortSignal
+): Promise<GenerationResult> {
+  const store = useAppStore.getState();
+  const geminiKeys = activeKeys(store.apiKeys, "gemini");
+  const openaiKeys = activeKeys(store.apiKeys, "openai");
+  if (geminiKeys.length === 0 && openaiKeys.length === 0) {
+    throw new NoActiveKeyError();
+  }
+
+  let sawRateLimit = false;
+  let lastError: unknown = null;
+  let geminiFailed = false;
+
+  if (geminiKeys.length > 0) {
+    try {
+      return await generateWithKeys("gemini", image, settings, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (isInvalidImageError(error)) throw error;
+      sawRateLimit ||= isRetryableFailure(error);
+      lastError = error;
+      geminiFailed = true;
+    }
+  }
+
+  if (openaiKeys.length > 0) {
+    if (geminiFailed) notifyProviderSwitch("gemini", "openai");
+    try {
+      return await generateWithKeys("openai", image, settings, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (isInvalidImageError(error)) throw error;
+      sawRateLimit ||= isRetryableFailure(error);
+      lastError = error;
+    }
+  }
+
+  if (sawRateLimit) {
+    throw new RateLimitedError(Math.max(1, retryDelayFor(lastError)));
+  }
+  throw lastError ?? new NoActiveKeyError();
+}
+
 async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   const store = useAppStore.getState();
   if (!store.images.some((item) => item.id === image.id)) {
@@ -222,7 +329,13 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   currentController = controller;
   currentImageId = image.id;
 
-  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
+  updateDebug(
+    null,
+    null,
+    activeKeys(useAppStore.getState().apiKeys).length,
+    null,
+    null
+  );
 
   store.patchQueueItem(image.id, {
     status: "analyzing",
@@ -242,8 +355,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   let result: GenerationResult;
   try {
     const { settings } = useAppStore.getState();
-    const keys = useAppStore.getState().apiKeys;
-    if (keys.length === 0) {
+    if (activeKeys(useAppStore.getState().apiKeys).length === 0) {
       result = generateLocal(image, settings);
     } else {
       const cacheKey = await resultCacheKey(image, settings);
@@ -254,7 +366,11 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
         let rateLimitRetries = 0;
         for (;;) {
           try {
-            result = await generateWithKeys(image, settings, controller.signal);
+            result = await generateWithProviders(
+              image,
+              settings,
+              controller.signal
+            );
             break;
           } catch (error) {
             if (controller.signal.aborted) throw error;
@@ -350,7 +466,7 @@ export async function runQueue(
 
   const activeKeyCount = activeKeys(store.apiKeys).length;
   const hasApiKeys = activeKeyCount > 0;
-  updateDebug(null, activeKeyCount, null);
+  updateDebug(null, null, activeKeyCount, null, null);
 
   active = true;
   stopRequested = false;
@@ -412,7 +528,13 @@ export async function runQueue(
   store.setQueueState("idle");
   store.setGenerating(false);
   store.setEta(null);
-  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
+  updateDebug(
+    null,
+    null,
+    activeKeys(useAppStore.getState().apiKeys).length,
+    null,
+    null
+  );
   if (!cancelled) {
     store.setProgress(100);
   }
@@ -515,6 +637,12 @@ export async function retryImage(imageId: string): Promise<void> {
     useAppStore.getState().setGenerating(false);
     useAppStore.getState().setQueueState("idle");
     useAppStore.getState().setEta(null);
-    updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
+    updateDebug(
+    null,
+    null,
+    activeKeys(useAppStore.getState().apiKeys).length,
+    null,
+    null
+  );
   }
 }

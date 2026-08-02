@@ -13,12 +13,25 @@ import { useAppStore } from "@/store/use-app-store"
 export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const model = useAppStore((state) => state.model);
+  const openaiModel = useAppStore((state) => state.openaiModel);
   const generating = useAppStore((state) => state.generating);
   const debugStatus = useAppStore((state) => state.debugStatus);
   const [keysOpen, setKeysOpen] = useState(false);
-  const activeKeyCount = apiKeys.filter(
-    (entry) => entry.enabled && entry.key.trim().length > 0
+  const geminiKeyCount = apiKeys.filter(
+    (entry) =>
+      entry.provider === "gemini" && entry.enabled && entry.key.trim().length > 0
   ).length;
+  const openaiKeyCount = apiKeys.filter(
+    (entry) =>
+      entry.provider === "openai" && entry.enabled && entry.key.trim().length > 0
+  ).length;
+  const activeKeyCount = geminiKeyCount + openaiKeyCount;
+  const providerLabel =
+    debugStatus.activeProvider === "openai"
+      ? "OpenAI"
+      : debugStatus.activeProvider === "gemini"
+        ? "Gemini"
+        : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -42,17 +55,26 @@ export function ControlCard() {
       >
         {activeKeyCount > 0 ? <Zap className="size-3" /> : <Sparkles className="size-3" />}
         {activeKeyCount > 0
-          ? `Gemini · ${model} · ${activeKeyCount} ${activeKeyCount === 1 ? "key" : "keys"}`
+          ? `Gemini ${model} (${geminiKeyCount}) · OpenAI ${openaiModel} (${openaiKeyCount})`
           : "Local engine"}
       </Badge>
 
-      {generating && debugStatus.activeKeyIndex != null ? (
+      {generating && providerLabel ? (
         <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-          <span>
-            Active key: {debugStatus.activeKeyIndex + 1}/{debugStatus.activeKeyCount}
-          </span>
+          <span className="font-semibold text-foreground">{providerLabel}</span>
           <span aria-hidden="true">·</span>
-          <span>Model: {debugStatus.activeModel ?? model}</span>
+          <span>
+            Key {debugStatus.activeKeyIndex != null ? debugStatus.activeKeyIndex + 1 : "–"}/
+            {debugStatus.activeKeyCount || "–"}
+          </span>
+          {debugStatus.activeKeyMasked ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{debugStatus.activeKeyMasked}</span>
+            </>
+          ) : null}
+          <span aria-hidden="true">·</span>
+          <span>Model: {debugStatus.activeModel ?? (providerLabel === "OpenAI" ? openaiModel : model)}</span>
         </p>
       ) : null}
 

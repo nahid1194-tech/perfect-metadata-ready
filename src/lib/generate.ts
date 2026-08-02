@@ -19,12 +19,20 @@ import {
 } from "@/lib/stock-spec";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const OPENAI_API_BASE = "https://api.openai.com/v1";
 
 export const GEMINI_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.5-pro",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
+];
+
+export const OPENAI_MODELS = [
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4.1",
+  "gpt-4.1-mini",
 ];
 
 const DEFAULT_RATE_LIMIT_MS = 30_000;
@@ -133,6 +141,32 @@ function buildApiError(
   return error;
 }
 
+type OpenAIApiErrorBody = {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string | number | null;
+  };
+};
+
+function buildOpenAIError(
+  data: unknown,
+  rawBody: string,
+  status: number,
+  fallback: string
+): GeminiApiError {
+  const payload = data as OpenAIApiErrorBody | null;
+  const error = new GeminiApiError(
+    payload?.error?.message ?? fallback,
+    status,
+    payload?.error?.code != null
+      ? String(payload.error.code)
+      : payload?.error?.type,
+    data ?? rawBody
+  );
+  return error;
+}
+
 export function isKeyFailure(error: unknown): boolean {
   if (!(error instanceof GeminiApiError)) return false;
   const message = error.message;
@@ -156,7 +190,9 @@ export function isModelBusy(error: unknown): boolean {
   if (!(error instanceof GeminiApiError)) return false;
   return (
     error.status === 503 ||
-    /model\s*busy|overloaded|service\s*unavailable|temporarily\s*unavailable/i.test(
+    error.status === 502 ||
+    error.status === 500 ||
+    /model\s*busy|overloaded|service\s*unavailable|temporarily\s*unavailable|server\s*error|temporary\s*server/i.test(
       error.message
     )
   );
@@ -642,6 +678,48 @@ export async function testGeminiConnection(apiKey: string): Promise<number> {
   return Array.isArray(json?.models) ? json.models.length : 0;
 }
 
+export async function testOpenAIConnection(apiKey: string): Promise<number> {
+  let response: Response;
+  try {
+    response = await fetch(`${OPENAI_API_BASE}/models`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch (error) {
+    console.error("[OpenAI] Network error while testing the connection", error);
+    throw new GeminiApiError(
+      error instanceof Error ? error.message : "Network request failed",
+      0
+    );
+  }
+
+  const rawBody = await response.text();
+  let data: unknown = null;
+  try {
+    data = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    data = null;
+  }
+
+  console.log("[OpenAI] Connection test response", {
+    status: response.status,
+    statusText: response.statusText,
+    body: data ?? rawBody,
+  });
+
+  if (!response.ok) {
+    throw buildOpenAIError(
+      data,
+      rawBody,
+      response.status,
+      `Connection failed (${response.status})`
+    );
+  }
+
+  const json = data as { data?: unknown[] } | null;
+  return Array.isArray(json?.data) ? json.data.length : 0;
+}
+
 const ADOBE_CATEGORY_GUIDE = ADOBE_CATEGORIES.map(
   (c) => `${c.id} ${c.label}`
 ).join(", ");
@@ -777,6 +855,126 @@ export async function generateWithApi(
       ...imageParts(image),
       { text: ANALYSIS_PROMPT + settingsPrompt },
     ],
+    apiKey,
+    model,
+    0.7,
+    signal
+  );
+
+  let metadata: GeneratedMetadata;
+
+  try {
+    const raw = JSON.parse(extractJson(rawText));
+    metadata = {
+      adobe: normalize(raw?.adobe, fallback.adobe, "adobe"),
+      shutterstock: normalize(raw?.shutterstock, fallback.shutterstock, "shutterstock"),
+    };
+  } catch {
+    metadata = fallback;
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    imageId: image.id,
+    createdAt: new Date().toISOString(),
+    imageName: image.name,
+    metadata: applySettings(metadata, fullSettings),
+  };
+}
+
+async function callOpenAI(
+  text: string,
+  image: ImageAsset,
+  apiKey: string,
+  model: string,
+  temperature: number,
+  signal?: AbortSignal
+): Promise<string> {
+  const source = image.apiDataUrl ?? image.dataUrl;
+  const mime = image.apiMimeType ?? image.type;
+  const imageUrl = source.startsWith("data:")
+    ? source
+    : `data:${mime};base64,${source}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal,
+      body: JSON.stringify({
+        model,
+        temperature,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text },
+              { type: "image_url", image_url: { url: imageUrl } },
+            ],
+          },
+        ],
+      }),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.error("[OpenAI] Network error while calling the API", error);
+    throw new GeminiApiError(
+      error instanceof Error ? error.message : "Network request failed",
+      0
+    );
+  }
+
+  const rawBody = await response.text();
+  let data: unknown = null;
+  try {
+    data = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    data = null;
+  }
+
+  console.log("[OpenAI] API response", {
+    status: response.status,
+    statusText: response.statusText,
+    body: data ?? rawBody,
+  });
+
+  if (!response.ok) {
+    throw buildOpenAIError(
+      data,
+      rawBody,
+      response.status,
+      `API request failed (${response.status})`
+    );
+  }
+
+  const json = data as
+    | { choices?: Array<{ message?: { content?: string } }> }
+    | null;
+  return json?.choices?.[0]?.message?.content ?? "";
+}
+
+export async function generateWithOpenAI(
+  image: ImageAsset,
+  apiKey: string,
+  model = "gpt-4o",
+  settings: Partial<GenerationSettings> = {},
+  signal?: AbortSignal
+): Promise<GenerationResult> {
+  const fullSettings: GenerationSettings = {
+    ...DEFAULT_GENERATION_SETTINGS,
+    ...settings,
+  };
+  const seed = hashString(image.name + image.size);
+  const fallback = buildMetadata(image, seed);
+  const settingsPrompt = buildSettingsPrompt(fullSettings);
+
+  const rawText = await callOpenAI(
+    ANALYSIS_PROMPT + settingsPrompt,
+    image,
     apiKey,
     model,
     0.7,

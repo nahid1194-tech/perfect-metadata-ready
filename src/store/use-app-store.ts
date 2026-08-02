@@ -80,6 +80,18 @@ type AppState = {
   clearResults: () => void;
   resultCache: Record<string, GenerationResult>;
   setResultCache: (key: string, result: GenerationResult) => void;
+  debugStatus: {
+    activeKeyIndex: number | null;
+    activeKeyCount: number;
+    activeModel: string | null;
+  };
+  setDebugStatus: (
+    patch: Partial<{
+      activeKeyIndex: number | null;
+      activeKeyCount: number;
+      activeModel: string | null;
+    }>
+  ) => void;
 };
 
 export const useAppStore = create<AppState>()(
@@ -216,6 +228,9 @@ export const useAppStore = create<AppState>()(
           }
           return { resultCache: next };
         }),
+      debugStatus: { activeKeyIndex: null, activeKeyCount: 0, activeModel: null },
+      setDebugStatus: (patch) =>
+        set((state) => ({ debugStatus: { ...state.debugStatus, ...patch } })),
     }),
     {
       name: "app-storage",

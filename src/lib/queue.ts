@@ -40,6 +40,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 const RATE_LIMIT_RETRY_CAP = 12;
+const IMAGE_DELAY_MIN_MS = 3000;
+const IMAGE_DELAY_MAX_MS = 5000;
+
+function updateDebug(
+  activeKeyIndex: number | null,
+  activeKeyCount: number,
+  activeModel: string | null
+): void {
+  useAppStore.getState().setDebugStatus({
+    activeKeyIndex,
+    activeKeyCount,
+    activeModel,
+  });
+}
 
 function sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -59,6 +73,24 @@ function sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+async function sleepBetweenImages(): Promise<void> {
+  const delayMs =
+    IMAGE_DELAY_MIN_MS + Math.random() * (IMAGE_DELAY_MAX_MS - IMAGE_DELAY_MIN_MS);
+  const chunk = 120;
+  let elapsed = 0;
+  while (elapsed < delayMs) {
+    if (stopRequested) return;
+    while (pauseRequested) {
+      if (stopRequested) return;
+      useAppStore.getState().setQueueState("paused");
+      await sleep(160);
+    }
+    useAppStore.getState().setQueueState("running");
+    await sleep(chunk);
+    elapsed += chunk;
+  }
+}
+
 async function waitForRateLimit(
   image: ImageAsset,
   error: RateLimitedError,
@@ -67,6 +99,7 @@ async function waitForRateLimit(
   const seconds = Math.max(1, Math.round(error.delayMs / 1000));
   const message = `API key rate-limited. Waiting ${seconds} seconds before retrying...`;
   console.log(`[Gemini] All active API keys rate-limited, pausing for ${seconds}s`);
+  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
   useAppStore.getState().patchQueueItem(image.id, {
     status: "retrying",
     error: null,
@@ -118,7 +151,8 @@ async function generateWithKeys(
   let nonRateLimitError: unknown = null;
 
   keyLoop:
-  for (const key of orderedKeys) {
+  for (let keyIndex = 0; keyIndex < orderedKeys.length; keyIndex++) {
+    const key = orderedKeys[keyIndex];
     const cooldownUntil = keyCooldownUntil(key.id, now);
     if (cooldownUntil) {
       sawRateLimit = true;
@@ -126,9 +160,14 @@ async function generateWithKeys(
       continue;
     }
 
-    console.log(`[Gemini] Using API key ${maskKey(key.key)}`);
+    console.log(
+      `[Gemini] Using API key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)})`
+    );
+    updateDebug(keyIndex, keys.length, null);
 
     for (const model of models) {
+      console.log(`[Gemini] Using model ${model}`);
+      updateDebug(keyIndex, keys.length, model);
       let networkRetries = 0;
       for (;;) {
         try {
@@ -182,6 +221,8 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   const controller = new AbortController();
   currentController = controller;
   currentImageId = image.id;
+
+  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
 
   store.patchQueueItem(image.id, {
     status: "analyzing",
@@ -307,6 +348,10 @@ export async function runQueue(
     store.setFailedImageIds([]);
   }
 
+  const activeKeyCount = activeKeys(store.apiKeys).length;
+  const hasApiKeys = activeKeyCount > 0;
+  updateDebug(null, activeKeyCount, null);
+
   active = true;
   stopRequested = false;
   pauseRequested = false;
@@ -350,6 +395,10 @@ export async function runQueue(
         Math.max(0, Math.round(((targets.length - completed) * averageMs) / 1000))
       );
     }
+
+    if (index < targets.length - 1 && hasApiKeys) {
+      await sleepBetweenImages();
+    }
   }
 
   const cancelled = stopRequested;
@@ -363,6 +412,7 @@ export async function runQueue(
   store.setQueueState("idle");
   store.setGenerating(false);
   store.setEta(null);
+  updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
   if (!cancelled) {
     store.setProgress(100);
   }
@@ -465,5 +515,6 @@ export async function retryImage(imageId: string): Promise<void> {
     useAppStore.getState().setGenerating(false);
     useAppStore.getState().setQueueState("idle");
     useAppStore.getState().setEta(null);
+    updateDebug(null, activeKeys(useAppStore.getState().apiKeys).length, null);
   }
 }

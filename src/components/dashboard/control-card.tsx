@@ -13,6 +13,8 @@ import { useAppStore } from "@/store/use-app-store"
 export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const model = useAppStore((state) => state.model);
+  const generating = useAppStore((state) => state.generating);
+  const debugStatus = useAppStore((state) => state.debugStatus);
   const [keysOpen, setKeysOpen] = useState(false);
   const activeKeyCount = apiKeys.filter(
     (entry) => entry.enabled && entry.key.trim().length > 0
@@ -43,6 +45,16 @@ export function ControlCard() {
           ? `Gemini · ${model} · ${activeKeyCount} ${activeKeyCount === 1 ? "key" : "keys"}`
           : "Local engine"}
       </Badge>
+
+      {generating && debugStatus.activeKeyIndex != null ? (
+        <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+          <span>
+            Active key: {debugStatus.activeKeyIndex + 1}/{debugStatus.activeKeyCount}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>Model: {debugStatus.activeModel ?? model}</span>
+        </p>
+      ) : null}
 
       <Button
         type="button"

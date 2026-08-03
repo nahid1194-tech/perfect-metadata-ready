@@ -38,6 +38,8 @@ type ConnStatus = "idle" | "testing" | "connected" | "failed";
 export function ApiKeySettings() {
   return (
     <div className="flex flex-col gap-5">
+      <PrimaryProviderPicker />
+
       <ProviderKeys
         provider="gemini"
         title="Gemini API Keys"
@@ -53,11 +55,44 @@ export function ApiKeySettings() {
       />
 
       <p className="text-xs text-muted-foreground">
-        Keys are saved in browser localStorage and loaded automatically. Gemini
-        is used first; if every Gemini key is rate-limited or exhausted, the
-        queue switches to OpenAI automatically and continues without losing
-        progress. If no active keys are added, a local engine generates results
-        on-device.
+        The primary provider is tried first for every image. If its API keys
+        are rate-limited or exhausted, the queue switches to the fallback
+        provider automatically, retries the same image, and continues without
+        losing progress. Keys are saved in browser localStorage and loaded
+        automatically. If no active keys are added, a local engine generates
+        results on-device.
+      </p>
+    </div>
+  );
+}
+
+function PrimaryProviderPicker() {
+  const primaryProvider = useAppStore((state) => state.primaryProvider);
+  const setPrimaryProvider = useAppStore((state) => state.setPrimaryProvider);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="primary-provider">Primary provider</Label>
+      <Select
+        id="primary-provider"
+        value={primaryProvider}
+        onChange={(event) => {
+          const next: ApiProvider =
+            event.target.value === "openai" ? "openai" : "gemini";
+          setPrimaryProvider(next);
+          toast(
+            "info",
+            "Primary provider",
+            `Primary Provider: ${next === "gemini" ? "Gemini" : "OpenAI"}`
+          );
+        }}
+      >
+        <option value="gemini">Gemini</option>
+        <option value="openai">OpenAI</option>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        Used first for every image; the other provider is used as automatic
+        fallback.
       </p>
     </div>
   );
@@ -78,6 +113,7 @@ function ProviderKeys({
   const addApiKey = useAppStore((state) => state.addApiKey);
   const updateApiKey = useAppStore((state) => state.updateApiKey);
   const removeApiKey = useAppStore((state) => state.removeApiKey);
+  const primaryProvider = useAppStore((state) => state.primaryProvider);
   const selectedModel = useAppStore(
     (state) => (provider === "gemini" ? state.model : state.openaiModel)
   );
@@ -168,7 +204,7 @@ function ProviderKeys({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold tracking-tight">{title}</p>
-        {provider === "gemini" ? (
+        {primaryProvider === provider ? (
           <span className="text-xs text-muted-foreground">Primary</span>
         ) : (
           <Badge variant="outline" className="text-xs">

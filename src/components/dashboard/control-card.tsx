@@ -4,17 +4,33 @@ import { useState } from "react"
 import { ChevronDown, KeyRound, Sparkles, Zap } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import type { ApiProvider } from "@/lib/types"
 import { ApiKeySettings } from "@/components/dashboard/api-key-settings"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store/use-app-store"
 
+const PROVIDER_LABEL: Record<ApiProvider, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI",
+};
+
+function Diag({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-semibold text-foreground">{value}</span>
+    </div>
+  );
+}
+
 export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const model = useAppStore((state) => state.model);
   const openaiModel = useAppStore((state) => state.openaiModel);
   const generating = useAppStore((state) => state.generating);
+  const primaryProvider = useAppStore((state) => state.primaryProvider);
   const debugStatus = useAppStore((state) => state.debugStatus);
   const [keysOpen, setKeysOpen] = useState(false);
   const geminiKeyCount = apiKeys.filter(
@@ -26,12 +42,20 @@ export function ControlCard() {
       entry.provider === "openai" && entry.enabled && entry.key.trim().length > 0
   ).length;
   const activeKeyCount = geminiKeyCount + openaiKeyCount;
-  const providerLabel =
-    debugStatus.activeProvider === "openai"
-      ? "OpenAI"
-      : debugStatus.activeProvider === "gemini"
-        ? "Gemini"
-        : null;
+  const fallbackProvider: ApiProvider =
+    primaryProvider === "gemini" ? "openai" : "gemini";
+  const primaryModel = primaryProvider === "gemini" ? model : openaiModel;
+  const fallbackModel = primaryProvider === "gemini" ? openaiModel : model;
+  const primaryKeyCount =
+    primaryProvider === "gemini" ? geminiKeyCount : openaiKeyCount;
+  const fallbackKeyCount =
+    primaryProvider === "gemini" ? openaiKeyCount : geminiKeyCount;
+  const providerLabel = debugStatus.activeProvider
+    ? PROVIDER_LABEL[debugStatus.activeProvider]
+    : null;
+  const activeModel =
+    debugStatus.activeModel ??
+    (debugStatus.activeProvider === "openai" ? openaiModel : model);
 
   return (
     <div className="flex flex-col gap-4">
@@ -55,7 +79,7 @@ export function ControlCard() {
       >
         {activeKeyCount > 0 ? <Zap className="size-3" /> : <Sparkles className="size-3" />}
         {activeKeyCount > 0
-          ? `Gemini ${model} (${geminiKeyCount}) · OpenAI ${openaiModel} (${openaiKeyCount})`
+          ? `Primary ${PROVIDER_LABEL[primaryProvider]} ${primaryModel} (${primaryKeyCount}) · Fallback ${PROVIDER_LABEL[fallbackProvider]} ${fallbackModel} (${fallbackKeyCount})`
           : "Local engine"}
       </Badge>
 
@@ -74,8 +98,37 @@ export function ControlCard() {
             </>
           ) : null}
           <span aria-hidden="true">·</span>
-          <span>Model: {debugStatus.activeModel ?? (providerLabel === "OpenAI" ? openaiModel : model)}</span>
+          <span>Model: {activeModel}</span>
         </p>
+      ) : null}
+
+      {activeKeyCount > 0 ? (
+        <div className="flex flex-col gap-2 rounded-xl border bg-background/60 p-3">
+          <p className="text-xs font-semibold tracking-tight text-muted-foreground">
+            Diagnostics
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-xs">
+            <Diag
+              label="Primary provider"
+              value={PROVIDER_LABEL[primaryProvider]}
+            />
+            <Diag label="Current provider" value={providerLabel ?? "–"} />
+            <Diag label="Active model" value={debugStatus.activeModel ?? "–"} />
+            <Diag label="Active API key" value={debugStatus.activeKeyMasked ?? "–"} />
+            <Diag
+              label="Remaining keys"
+              value={
+                debugStatus.remainingKeys != null
+                  ? `${debugStatus.remainingKeys}`
+                  : "–"
+              }
+            />
+            <Diag
+              label="Fallback status"
+              value={debugStatus.fallbackActive ? "Active" : "Standby"}
+            />
+          </div>
+        </div>
       ) : null}
 
       <Button

@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
 type AppState = {
   theme: Theme;
   apiKeys: ApiKeyEntry[];
+  primaryProvider: ApiProvider;
   model: string;
   openaiModel: string;
   images: ImageAsset[];
@@ -52,6 +53,7 @@ type AppState = {
   addApiKey: (entry: ApiKeyEntry) => void;
   updateApiKey: (id: string, patch: Partial<Omit<ApiKeyEntry, "id">>) => void;
   removeApiKey: (id: string) => void;
+  setPrimaryProvider: (provider: ApiProvider) => void;
   setModel: (model: string) => void;
   setOpenaiModel: (model: string) => void;
   setSettings: (patch: Partial<GenerationSettings>) => void;
@@ -89,6 +91,8 @@ type AppState = {
     activeKeyCount: number;
     activeModel: string | null;
     activeKeyMasked: string | null;
+    remainingKeys: number | null;
+    fallbackActive: boolean;
   };
   setDebugStatus: (
     patch: Partial<{
@@ -97,6 +101,8 @@ type AppState = {
       activeKeyCount: number;
       activeModel: string | null;
       activeKeyMasked: string | null;
+      remainingKeys: number | null;
+      fallbackActive: boolean;
     }>
   ) => void;
 };
@@ -106,6 +112,7 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       theme: "light",
       apiKeys: [],
+      primaryProvider: "gemini",
       model: "gemini-2.5-flash",
       openaiModel: "gpt-4o",
       images: [],
@@ -136,6 +143,7 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           apiKeys: state.apiKeys.filter((entry) => entry.id !== id),
         })),
+      setPrimaryProvider: (primaryProvider) => set({ primaryProvider }),
       setModel: (model) => set({ model }),
       setOpenaiModel: (openaiModel) => set({ openaiModel }),
       setSettings: (patch) =>
@@ -243,6 +251,8 @@ export const useAppStore = create<AppState>()(
         activeKeyCount: 0,
         activeModel: null,
         activeKeyMasked: null,
+        remainingKeys: null,
+        fallbackActive: false,
       },
       setDebugStatus: (patch) =>
         set((state) => ({ debugStatus: { ...state.debugStatus, ...patch } })),
@@ -252,6 +262,7 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         theme: state.theme,
         apiKeys: state.apiKeys,
+        primaryProvider: state.primaryProvider,
         model: state.model,
         openaiModel: state.openaiModel,
         settings: state.settings,
@@ -296,6 +307,9 @@ export const useAppStore = create<AppState>()(
         }
         if (typeof merged.openaiModel !== "string" || !merged.openaiModel) {
           merged.openaiModel = "gpt-4o";
+        }
+        if (merged.primaryProvider !== "gemini" && merged.primaryProvider !== "openai") {
+          merged.primaryProvider = "gemini";
         }
         if (Array.isArray(merged.results)) {
           merged.results = merged.results.map((result: GenerationResult) => ({

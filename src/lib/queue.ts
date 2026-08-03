@@ -25,6 +25,7 @@ import {
   RateLimitedError,
   rateLimitDelayMs,
   testGeminiConnection,
+  testOpenAIConnection,
 } from "@/lib/generate";
 import type {
   ApiProvider,
@@ -49,7 +50,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const RATE_LIMIT_RETRY_CAP = 12;
 const IMAGE_DELAY_MIN_MS = 400;
 const IMAGE_DELAY_MAX_MS = 800;
 
@@ -60,12 +60,20 @@ function updateDebug(
   activeModel: string | null,
   activeKeyMasked: string | null
 ): void {
+  const store = useAppStore.getState();
+  const remainingKeys =
+    activeProvider && activeKeyIndex != null && activeKeyCount > 0
+      ? activeKeyCount - activeKeyIndex
+      : null;
   useAppStore.getState().setDebugStatus({
     activeProvider,
     activeKeyIndex,
     activeKeyCount,
     activeModel,
     activeKeyMasked,
+    remainingKeys,
+    fallbackActive:
+      activeProvider !== null && activeProvider !== store.primaryProvider,
   });
 }
 
@@ -74,7 +82,7 @@ function providerLabel(provider: ApiProvider): string {
 }
 
 let lastProviderSwitchToastAt = 0;
-let lastOpenAiKeySwitchToastAt = 0;
+let lastApiKeySwitchToastAt = 0;
 
 function logProviderState(
   provider: ApiProvider,
@@ -89,26 +97,30 @@ function logProviderState(
   updateDebug(provider, keyIndex, keyCount, model, keyMasked);
 }
 
-function notifyProviderSwitch(from: ApiProvider, to: ApiProvider, reason: string): void {
+function notifyProviderSwitch(
+  from: ApiProvider,
+  to: ApiProvider,
+  reason: string,
+  isRecovery = false
+): void {
   console.log(
     `[Queue] Provider switch: ${providerLabel(from)} -> ${providerLabel(to)} | reason: ${reason}`
   );
   const now = Date.now();
   if (now - lastProviderSwitchToastAt < 15000) return;
   lastProviderSwitchToastAt = now;
-  const message =
-    to === "openai"
-      ? "Gemini unavailable. Switched to OpenAI."
-      : "Gemini is available again. Switched back to Gemini.";
+  const message = isRecovery
+    ? `${providerLabel(to)} is available again. Switched back to ${providerLabel(to)}.`
+    : `${providerLabel(from)} rate-limited. Switched to ${providerLabel(to)}.`;
   toast("info", "Provider switched", message);
 }
 
-function notifyOpenAiKeySwitch(nextKeyIndex: number): void {
+function notifyApiKeySwitch(provider: ApiProvider, nextKeyIndex: number): void {
   if (nextKeyIndex === 0) return;
   const now = Date.now();
-  if (now - lastOpenAiKeySwitchToastAt < 10000) return;
-  lastOpenAiKeySwitchToastAt = now;
-  const message = `Switched to OpenAI API Key #${nextKeyIndex + 1}.`;
+  if (now - lastApiKeySwitchToastAt < 10000) return;
+  lastApiKeySwitchToastAt = now;
+  const message = `Switched to ${providerLabel(provider)} API Key #${nextKeyIndex + 1}.`;
   console.log(`[Queue] ${message}`);
   toast("info", "API key switched", message);
 }
@@ -156,7 +168,9 @@ async function waitForRateLimit(
 ): Promise<void> {
   const seconds = Math.max(1, Math.round(error.delayMs / 1000));
   const message = `API key rate-limited. Waiting ${seconds} seconds before retrying...`;
-  console.log(`[Gemini] All active API keys rate-limited, pausing for ${seconds}s`);
+  console.log(
+    `[Queue] All active API keys rate-limited, pausing for ${seconds}s`
+  );
   updateDebug(
     null,
     null,
@@ -259,7 +273,7 @@ async function generateWithKeys(
             console.log(
               `[${provider}] API key ${maskKey(key.key)} rate-limited, switching to the next active key`
             );
-            if (provider === "openai") notifyOpenAiKeySwitch(keyIndex + 1);
+            notifyApiKeySwitch(provider, keyIndex + 1);
             continue keyLoop;
           }
           if (isNetworkError(error) && networkRetries < 2) {
@@ -274,7 +288,7 @@ async function generateWithKeys(
           }
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
-            if (provider === "openai") notifyOpenAiKeySwitch(keyIndex + 1);
+            notifyApiKeySwitch(provider, keyIndex + 1);
             continue keyLoop;
           }
           nonRateLimitError ??= error;
@@ -337,16 +351,21 @@ async function generateWithProviders(
       const result = await generateWithKeys(provider, image, settings, signal, {
         stopOnProviderError: isPrimary,
       });
-      if (provider === "gemini" && preferredProvider !== "gemini") {
-        preferredProvider = "gemini";
+      if (provider === primary && preferredProvider !== primary) {
+        preferredProvider = primary;
         logProviderState(
-          "gemini",
+          primary,
           0,
-          activeKeys(store.apiKeys, "gemini").length,
-          store.model,
-          maskKey(activeKeys(store.apiKeys, "gemini")[0]?.key ?? "")
+          activeKeys(store.apiKeys, primary).length,
+          primary === "gemini" ? store.model : store.openaiModel,
+          maskKey(activeKeys(store.apiKeys, primary)[0]?.key ?? "")
         );
-        notifyProviderSwitch("openai", "gemini", "Gemini became available again");
+        notifyProviderSwitch(
+          fallback,
+          primary,
+          `${providerLabel(primary)} became available again`,
+          true
+        );
       }
       return result;
     } catch (error) {
@@ -363,6 +382,11 @@ async function generateWithProviders(
           maskKey(activeKeys(store.apiKeys, fallback)[0]?.key ?? "")
         );
         notifyProviderSwitch(provider, fallback, providerSwitchReason(error));
+        toast(
+          "info",
+          "Using fallback provider",
+          "Retrying image using fallback provider..."
+        );
       }
     }
   }
@@ -379,18 +403,33 @@ async function recoveryProbeLoop(): Promise<void> {
   while (active && !stopRequested) {
     await sleep(RECOVERY_PROBE_INTERVAL_MS);
     if (!active || stopRequested) break;
-    if (preferredProvider !== "gemini") {
-      const store = useAppStore.getState();
-      const geminiKeys = activeKeys(store.apiKeys, "gemini");
-      if (geminiKeys.length === 0) continue;
-      const key = geminiKeys[0];
+    const store = useAppStore.getState();
+    const primary = store.primaryProvider;
+    if (preferredProvider !== primary) {
+      const primaryKeys = activeKeys(store.apiKeys, primary);
+      if (primaryKeys.length === 0) continue;
+      const key = primaryKeys[0];
       try {
-        await testGeminiConnection(key.key);
-        preferredProvider = "gemini";
-        logProviderState("gemini", 0, geminiKeys.length, store.model, maskKey(key.key));
-        notifyProviderSwitch("openai", "gemini", "Gemini became available again");
+        await (primary === "gemini"
+          ? testGeminiConnection(key.key)
+          : testOpenAIConnection(key.key));
+        const from = preferredProvider;
+        preferredProvider = primary;
+        logProviderState(
+          primary,
+          0,
+          primaryKeys.length,
+          primary === "gemini" ? store.model : store.openaiModel,
+          maskKey(key.key)
+        );
+        notifyProviderSwitch(
+          from,
+          primary,
+          `${providerLabel(primary)} became available again`,
+          true
+        );
       } catch {
-        // Gemini still unavailable; keep using OpenAI.
+        // Primary still unavailable; keep using the fallback.
       }
     }
   }
@@ -442,7 +481,6 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
       if (!force && cached) {
         result = rebaseCachedResult(cached, image);
       } else {
-        let rateLimitRetries = 0;
         for (;;) {
           try {
             result = await generateWithProviders(
@@ -454,8 +492,6 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
           } catch (error) {
             if (controller.signal.aborted) throw error;
             if (!(error instanceof RateLimitedError)) throw error;
-            if (rateLimitRetries >= RATE_LIMIT_RETRY_CAP) throw error;
-            rateLimitRetries++;
             await waitForRateLimit(image, error, controller);
           }
         }
@@ -552,7 +588,12 @@ export async function runQueue(
   pauseRequested = false;
   currentController = null;
   currentImageId = null;
-  preferredProvider = "gemini";
+  preferredProvider = store.primaryProvider;
+  toast(
+    "info",
+    "Primary provider",
+    `Primary Provider: ${providerLabel(store.primaryProvider)}`
+  );
   void recoveryProbeLoop();
 
   store.enqueue(targets.map((image) => image.id));
@@ -696,7 +737,12 @@ export async function retryImage(imageId: string): Promise<void> {
   pauseRequested = false;
   currentController = null;
   currentImageId = null;
-  preferredProvider = "gemini";
+  preferredProvider = useAppStore.getState().primaryProvider;
+  toast(
+    "info",
+    "Primary provider",
+    `Primary Provider: ${providerLabel(preferredProvider)}`
+  );
   void recoveryProbeLoop();
 
   store.enqueue([imageId]);

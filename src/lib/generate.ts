@@ -733,15 +733,88 @@ const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
   (c) => `${c.id} ${c.label}`
 ).join(", ");
 
-const ANALYSIS_PROMPT = `You are a stock-photography metadata generator. Analyze the image and reply with ONLY this JSON object (no markdown, no commentary):
+const VISUAL_ANALYSIS_PROMPT = `You are a meticulous visual analyst for stock photography and vector/design assets. Examine the image region by region and describe ONLY what is clearly visible. Never guess, assume, or invent content - if something is not visible, do not include it and leave the field empty or as an empty array.
+
+Take your time and analyze deeply: primary subject, secondary objects, shapes, colors, texture, style, composition, perspective, lighting, background, graphic elements, design style, and industry relevance.
+
+Reply with ONLY this JSON object (no markdown, no commentary):
+{
+  "subject": "",
+  "style": "",
+  "objects": [],
+  "colors": [],
+  "composition": "",
+  "background": "",
+  "concepts": [],
+  "secondaryObjects": [],
+  "shapes": [],
+  "texture": "",
+  "perspective": "",
+  "lighting": "",
+  "graphicElements": [],
+  "designStyle": "",
+  "industryRelevance": "",
+  "artworkType": ""
+}
+
+Field guidance:
+- "subject": the single primary subject, named literally (e.g. "a red vintage bicycle").
+- "style": photographic, illustration, 3D render, flat vector, line art, abstract, etc.
+- "objects": every clearly visible object, most prominent first.
+- "colors": dominant colors, most prominent first (e.g. "teal", "warm beige").
+- "composition": arrangement, e.g. centered, rule of thirds, symmetrical, layered, diagonal flow.
+- "background": what the background actually shows, or "" if none.
+- "concepts": only concepts unambiguously supported by visible content (e.g. for a beach photo: "coastline", "summer"; never "success" or "business" unless literally depicted).
+- "graphicElements": visible design elements such as lines, waves, dots, geometric shapes, gradient bands, typography, frames.
+- "designStyle": if it is a designed asset, name the design style (minimal, flat, corporate, geometric, hand-drawn, corporate gradient, etc.); otherwise "".
+- "industryRelevance": only if the content clearly depicts a specific industry context (e.g. "healthcare" only if medical imagery is visible); otherwise "".
+- "artworkType": ONLY one of these if the asset is abstract/vector/designed, otherwise "": abstract background, geometric pattern, fluid shape, brush texture, wave line, gradient mesh, modern banner, minimal poster, brochure cover, presentation background, template, wallpaper, vector illustration.
+- "texture", "perspective", "lighting": describe only if clearly visible, otherwise "".
+
+Return ONLY the JSON object.`;
+
+const METADATA_PROMPT = `You are a stock-photography metadata generator for Adobe Stock and Shutterstock. You will receive a visual analysis of an image. Generate the metadata STRICTLY and ONLY from that analysis - the image itself is not available to you, so never invent, guess, or assume any element that is not present in the analysis.
+
+Reply with ONLY this JSON object (no markdown, no commentary):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
 
 Rules:
-- Describe only what is clearly visible. Never invent content.
+- Describe only what is clearly visible in the analysis. Every title, keyword, description term, and concept must trace back to the analysis.
+- Keywords must be ranked by visual importance (most important first). Precision over quantity: remove any keyword that is weak, generic, vague, or not visibly present in the image.
+- The title must describe exactly what is visible.
+- Do NOT use any of these keywords unless the analysis clearly supports them: business, technology, innovation, success, marketing, corporate, digital, solution, strategy, startup, leadership, finance.
+- For abstract/vector/designed assets, describe the actual visible design (colours, shapes, lines, gradients, layout) and use the analysis "artworkType" term when naming it, e.g. abstract background, geometric pattern, fluid shape, brush texture, wave line, gradient mesh, modern banner, minimal poster, brochure cover, presentation background, template, wallpaper, vector illustration.
 - Adobe: title = brief natural sentence, 60-70 chars, no commas, no technical/gear terms; keywords <=49 unique, ordered by importance (most important first); category = ONE ID from: ${ADOBE_CATEGORY_GUIDE}
 - Shutterstock: title + description = natural descriptive headlines covering who/what/where and mood; description <=2048 chars; no links, camera info, trademarks; keywords 7-50 unique; category = 1-2 IDs comma-separated from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
 - No trademarks, brands, artist names, real people, or personal data. English only.
+
+BEFORE returning, self-validate: does every keyword exist visually in the analysis? does the title accurately describe the visible content? Remove every weak, generic, or misleading keyword. Precision over quantity.
+
 Return ONLY the JSON object.`;
+
+function buildMetadataPrompt(
+  analysisJson: string,
+  settingsPrompt: string
+): string {
+  return `${METADATA_PROMPT}
+
+VISUAL ANALYSIS OF THE IMAGE (the only source of truth - the image itself is NOT provided):
+${analysisJson}${settingsPrompt}`;
+}
+
+function isValidAnalysis(text: string): boolean {
+  try {
+    const json = JSON.parse(text);
+    return (
+      typeof json === "object" &&
+      json !== null &&
+      !Array.isArray(json) &&
+      typeof json.subject === "string"
+    );
+  } catch {
+    return false;
+  }
+}
 
 function buildSettingsPrompt(settings: GenerationSettings): string {
   const parts: string[] = [
@@ -881,26 +954,41 @@ export async function generateWithApi(
   const settingsPrompt = buildSettingsPrompt(fullSettings);
 
   const parts = await imageParts(image);
-  parts.push({ text: ANALYSIS_PROMPT + settingsPrompt });
+  parts.push({ text: VISUAL_ANALYSIS_PROMPT });
 
-  const rawText = await callGemini(
+  const analysisRaw = await callGemini(
     parts,
     apiKey,
     model,
-    0.7,
+    0.4,
     signal
   );
 
   let metadata: GeneratedMetadata;
 
-  try {
-    const raw = JSON.parse(extractJson(rawText));
-    metadata = {
-      adobe: normalize(raw?.adobe, fallback.adobe, "adobe"),
-      shutterstock: normalize(raw?.shutterstock, fallback.shutterstock, "shutterstock"),
-    };
-  } catch {
+  if (!isValidAnalysis(extractJson(analysisRaw))) {
+    console.warn(
+      "[Generate] Visual analysis was not usable, falling back to local metadata"
+    );
     metadata = fallback;
+  } else {
+    const rawText = await callGemini(
+      [{ text: buildMetadataPrompt(extractJson(analysisRaw), settingsPrompt) }],
+      apiKey,
+      model,
+      0.7,
+      signal
+    );
+
+    try {
+      const raw = JSON.parse(extractJson(rawText));
+      metadata = {
+        adobe: normalize(raw?.adobe, fallback.adobe, "adobe"),
+        shutterstock: normalize(raw?.shutterstock, fallback.shutterstock, "shutterstock"),
+      };
+    } catch {
+      metadata = fallback;
+    }
   }
 
   return {
@@ -914,7 +1002,7 @@ export async function generateWithApi(
 
 async function callOpenAI(
   text: string,
-  imageUrl: string,
+  imageUrl: string | undefined,
   apiKey: string,
   model: string,
   temperature: number,
@@ -922,6 +1010,12 @@ async function callOpenAI(
 ): Promise<string> {
   let response: Response;
   try {
+    const content: unknown[] = imageUrl
+      ? [
+          { type: "text", text },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ]
+      : [{ type: "text", text }];
     response = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
       method: "POST",
       headers: {
@@ -932,15 +1026,7 @@ async function callOpenAI(
       body: JSON.stringify({
         model,
         temperature,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text },
-              { type: "image_url", image_url: { url: imageUrl } },
-            ],
-          },
-        ],
+        messages: [{ role: "user", content }],
       }),
     });
   } catch (error) {
@@ -1001,25 +1087,41 @@ export async function generateWithOpenAI(
     ? dataUrl
     : `data:${mimeType};base64,${dataUrl}`;
 
-  const rawText = await callOpenAI(
-    ANALYSIS_PROMPT + settingsPrompt,
+  const analysisRaw = await callOpenAI(
+    VISUAL_ANALYSIS_PROMPT,
     imageUrl,
     apiKey,
     model,
-    0.7,
+    0.4,
     signal
   );
 
   let metadata: GeneratedMetadata;
 
-  try {
-    const raw = JSON.parse(extractJson(rawText));
-    metadata = {
-      adobe: normalize(raw?.adobe, fallback.adobe, "adobe"),
-      shutterstock: normalize(raw?.shutterstock, fallback.shutterstock, "shutterstock"),
-    };
-  } catch {
+  if (!isValidAnalysis(extractJson(analysisRaw))) {
+    console.warn(
+      "[Generate] Visual analysis was not usable, falling back to local metadata"
+    );
     metadata = fallback;
+  } else {
+    const rawText = await callOpenAI(
+      buildMetadataPrompt(extractJson(analysisRaw), settingsPrompt),
+      undefined,
+      apiKey,
+      model,
+      0.7,
+      signal
+    );
+
+    try {
+      const raw = JSON.parse(extractJson(rawText));
+      metadata = {
+        adobe: normalize(raw?.adobe, fallback.adobe, "adobe"),
+        shutterstock: normalize(raw?.shutterstock, fallback.shutterstock, "shutterstock"),
+      };
+    } catch {
+      metadata = fallback;
+    }
   }
 
   return {

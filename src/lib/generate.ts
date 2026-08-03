@@ -17,6 +17,12 @@ import {
   isValidAdobeCategory,
   isValidShutterstockCategories,
 } from "@/lib/stock-spec";
+import {
+  IMAGE_API_MAX_DIMENSION,
+  IMAGE_MAX_BYTES,
+  compressImageDataUrl,
+} from "@/lib/image-process";
+import { useAppStore } from "@/store/use-app-store";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -727,16 +733,15 @@ const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
   (c) => `${c.id} ${c.label}`
 ).join(", ");
 
-const ANALYSIS_PROMPT = `You are a professional stock-photography metadata generator. Analyze the image and respond with ONE JSON object only:
+const ANALYSIS_PROMPT = `You are a stock-photography metadata generator. Analyze the image and reply with ONLY this JSON object (no markdown, no commentary):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
 
 Rules:
 - Describe only what is clearly visible. Never invent content.
-- Adobe (no description field): title is a brief, clear, natural sentence focusing on what is most visually important, 60-70 chars, no commas, no keyword stuffing, no technical or gear-heavy terms; keywords up to 49, no duplicates, ordered by importance with the most important in the first 10 positions; category is ONE Adobe ID from: ${ADOBE_CATEGORY_GUIDE}
-- Shutterstock: title and description are natural, detailed descriptive sentences or phrases (not keyword lists) that read like headlines, covering who/what/where and the mood of the content; description max 2048 chars; no links, camera information, or trademarks; keywords 7-50 unique words, no duplicates, no repeated words; category is 1-2 IDs comma-separated from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
-- No trademarks, brand names, artist names, real people, or personal data.
-- Use each keyword once; submit content in one language only (English).
-Return ONLY the JSON object, no markdown, no commentary.`;
+- Adobe: title = brief natural sentence, 60-70 chars, no commas, no technical/gear terms; keywords <=49 unique, ordered by importance (most important first); category = ONE ID from: ${ADOBE_CATEGORY_GUIDE}
+- Shutterstock: title + description = natural descriptive headlines covering who/what/where and mood; description <=2048 chars; no links, camera info, trademarks; keywords 7-50 unique; category = 1-2 IDs comma-separated from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
+- No trademarks, brands, artist names, real people, or personal data. English only.
+Return ONLY the JSON object.`;
 
 function buildSettingsPrompt(settings: GenerationSettings): string {
   const parts: string[] = [
@@ -828,11 +833,36 @@ async function callGemini(
   );
 }
 
-function imageParts(image: ImageAsset): unknown[] {
-  const source = image.apiDataUrl ?? image.dataUrl;
-  const base64 = source.split(",")[1] ?? source;
-  const mime = image.apiMimeType ?? image.type;
-  return [{ inline_data: { mime_type: mime, data: base64 } }];
+async function ensureApiImage(
+  image: ImageAsset
+): Promise<{ dataUrl: string; mimeType: string }> {
+  if (image.apiDataUrl && image.apiMimeType) {
+    return { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
+  }
+  try {
+    const compressed = await compressImageDataUrl(
+      image.dataUrl,
+      IMAGE_MAX_BYTES,
+      IMAGE_API_MAX_DIMENSION
+    );
+    useAppStore.getState().updateImage(image.id, {
+      apiDataUrl: compressed.dataUrl,
+      apiMimeType: compressed.mimeType,
+    });
+    return compressed;
+  } catch (error) {
+    console.warn(
+      "[Image] Could not compress on the fly, sending the original image",
+      error
+    );
+    return { dataUrl: image.dataUrl, mimeType: image.type };
+  }
+}
+
+async function imageParts(image: ImageAsset): Promise<unknown[]> {
+  const { dataUrl, mimeType } = await ensureApiImage(image);
+  const base64 = dataUrl.split(",")[1] ?? dataUrl;
+  return [{ inline_data: { mime_type: mimeType, data: base64 } }];
 }
 
 export async function generateWithApi(
@@ -850,11 +880,11 @@ export async function generateWithApi(
   const fallback = buildMetadata(image, seed);
   const settingsPrompt = buildSettingsPrompt(fullSettings);
 
+  const parts = await imageParts(image);
+  parts.push({ text: ANALYSIS_PROMPT + settingsPrompt });
+
   const rawText = await callGemini(
-    [
-      ...imageParts(image),
-      { text: ANALYSIS_PROMPT + settingsPrompt },
-    ],
+    parts,
     apiKey,
     model,
     0.7,
@@ -884,18 +914,12 @@ export async function generateWithApi(
 
 async function callOpenAI(
   text: string,
-  image: ImageAsset,
+  imageUrl: string,
   apiKey: string,
   model: string,
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
-  const source = image.apiDataUrl ?? image.dataUrl;
-  const mime = image.apiMimeType ?? image.type;
-  const imageUrl = source.startsWith("data:")
-    ? source
-    : `data:${mime};base64,${source}`;
-
   let response: Response;
   try {
     response = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
@@ -972,9 +996,14 @@ export async function generateWithOpenAI(
   const fallback = buildMetadata(image, seed);
   const settingsPrompt = buildSettingsPrompt(fullSettings);
 
+  const { dataUrl, mimeType } = await ensureApiImage(image);
+  const imageUrl = dataUrl.startsWith("data:")
+    ? dataUrl
+    : `data:${mimeType};base64,${dataUrl}`;
+
   const rawText = await callOpenAI(
     ANALYSIS_PROMPT + settingsPrompt,
-    image,
+    imageUrl,
     apiKey,
     model,
     0.7,

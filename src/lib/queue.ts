@@ -43,8 +43,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 const RATE_LIMIT_RETRY_CAP = 12;
-const IMAGE_DELAY_MIN_MS = 3000;
-const IMAGE_DELAY_MAX_MS = 5000;
+const IMAGE_DELAY_MIN_MS = 400;
+const IMAGE_DELAY_MAX_MS = 800;
 
 function updateDebug(
   activeProvider: ApiProvider | null,
@@ -73,7 +73,10 @@ function notifyProviderSwitch(from: ApiProvider, to: ApiProvider): void {
   const now = Date.now();
   if (now - lastProviderSwitchToastAt < 15000) return;
   lastProviderSwitchToastAt = now;
-  const message = `All ${providerLabel(from)} API keys exhausted. Switched to ${providerLabel(to)} automatically.`;
+  const message =
+    to === "openai"
+      ? "Gemini quota reached. Switched to OpenAI automatically."
+      : `All ${providerLabel(from)} API keys exhausted. Switched to ${providerLabel(to)} automatically.`;
   console.log(`[Queue] ${message}`);
   toast("info", "Provider switched", message);
 }
@@ -293,7 +296,6 @@ async function generateWithProviders(
       return await generateWithKeys("gemini", image, settings, signal);
     } catch (error) {
       if (signal.aborted) throw error;
-      if (isInvalidImageError(error)) throw error;
       sawRateLimit ||= isRetryableFailure(error);
       lastError = error;
       geminiFailed = true;
@@ -306,7 +308,6 @@ async function generateWithProviders(
       return await generateWithKeys("openai", image, settings, signal);
     } catch (error) {
       if (signal.aborted) throw error;
-      if (isInvalidImageError(error)) throw error;
       sawRateLimit ||= isRetryableFailure(error);
       lastError = error;
     }

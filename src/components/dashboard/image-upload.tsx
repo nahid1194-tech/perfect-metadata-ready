@@ -10,6 +10,7 @@ import {
   ImageTooLargeError,
   compressImageDataUrl,
 } from "@/lib/image-process"
+import { isVectorFile, renderVectorToPng } from "@/lib/eps-render"
 import type { ImageAsset } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
@@ -20,7 +21,7 @@ const MAX_IMAGES = 100;
 
 type UploadItem = {
   file: File;
-  phase: "reading" | "compressing";
+  phase: "reading" | "compressing" | "converting";
   progress: number;
 };
 
@@ -121,7 +122,25 @@ export function ImageUpload() {
 
           let apiDataUrl: string | undefined;
           let apiMimeType: string | undefined;
-          if (isCompressible(file)) {
+          let type = file.type || file.name.replace(/.*\./, "");
+          if (isVectorFile(file)) {
+            if (file.size > IMAGE_MAX_BYTES) {
+              throw new ImageTooLargeError(
+                `${file.name} is larger than 20 MB — use a vector file of 20 MB or less.`
+              );
+            }
+            patchItem(file, { phase: "converting", progress: 0 });
+            const rendered = await renderVectorToPng(file);
+            patchItem(file, { phase: "converting", progress: 100 });
+            const compressed = await compressImageDataUrl(
+              rendered.dataUrl,
+              IMAGE_MAX_BYTES,
+              IMAGE_API_MAX_DIMENSION
+            );
+            apiDataUrl = compressed.dataUrl;
+            apiMimeType = compressed.mimeType;
+            type = compressed.mimeType;
+          } else if (isCompressible(file)) {
             patchItem(file, { phase: "compressing", progress: 0 });
             const compressed = await compressImageDataUrl(
               dataUrl,
@@ -141,7 +160,7 @@ export function ImageUpload() {
             id: crypto.randomUUID(),
             name: file.name,
             size: file.size,
-            type: file.type || file.name.replace(/.*\./, ""),
+            type,
             dataUrl,
             apiDataUrl,
             apiMimeType,
@@ -151,7 +170,7 @@ export function ImageUpload() {
           failed++;
           toast(
             "error",
-            "Image too large",
+            error instanceof ImageTooLargeError ? "Image too large" : "Could not process file",
             error instanceof ImageTooLargeError
               ? error.message
               : `${file.name} could not be processed. ${
@@ -245,10 +264,10 @@ export function ImageUpload() {
             <div key={index} className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="min-w-0 truncate font-medium">{item.file.name}</span>
-                {item.phase === "compressing" ? (
+                {item.phase === "compressing" || item.phase === "converting" ? (
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" />
-                    Compressing…
+                    {item.phase === "converting" ? "Converting…" : "Compressing…"}
                   </span>
                 ) : (
                   <span className="shrink-0 text-muted-foreground tabular-nums">
@@ -257,10 +276,12 @@ export function ImageUpload() {
                 )}
               </div>
               <Progress
-                value={item.phase === "compressing" ? 100 : item.progress}
+                value={item.phase === "compressing" || item.phase === "converting" ? 100 : item.progress}
                 className="h-1"
                 indicatorClassName={
-                  item.phase === "compressing" ? "animate-pulse bg-primary/70" : undefined
+                  item.phase === "compressing" || item.phase === "converting"
+                    ? "animate-pulse bg-primary/70"
+                    : undefined
                 }
               />
             </div>

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { FALLBACK_MODELS } from "@/lib/model-catalog";
 import type {
   ApiKeyEntry,
   ApiProvider,
@@ -32,9 +33,8 @@ type AppState = {
   theme: Theme;
   apiKeys: ApiKeyEntry[];
   primaryProvider: ApiProvider;
-  model: string;
-  openaiModel: string;
-  mistralModel: string;
+  providerModels: Record<ApiProvider, string[]>;
+  providerModelsFetchedAt: Record<ApiProvider, number | null>;
   images: ImageAsset[];
   selectedIds: string[];
   results: GenerationResult[];
@@ -55,9 +55,11 @@ type AppState = {
   updateApiKey: (id: string, patch: Partial<Omit<ApiKeyEntry, "id">>) => void;
   removeApiKey: (id: string) => void;
   setPrimaryProvider: (provider: ApiProvider) => void;
-  setModel: (model: string) => void;
-  setOpenaiModel: (model: string) => void;
-  setMistralModel: (model: string) => void;
+  setProviderModels: (
+    provider: ApiProvider,
+    models: string[],
+    fetchedAt: number
+  ) => void;
   setSettings: (patch: Partial<GenerationSettings>) => void;
   addImages: (images: ImageAsset[]) => void;
   updateImage: (id: string, patch: Partial<ImageAsset>) => void;
@@ -115,9 +117,12 @@ export const useAppStore = create<AppState>()(
       theme: "light",
       apiKeys: [],
       primaryProvider: "gemini",
-      model: "gemini-2.5-flash",
-      openaiModel: "gpt-4o",
-      mistralModel: "pixtral-large-latest",
+      providerModels: { ...FALLBACK_MODELS },
+      providerModelsFetchedAt: {
+        gemini: null,
+        openai: null,
+        mistral: null,
+      },
       images: [],
       selectedIds: [],
       results: [],
@@ -147,9 +152,14 @@ export const useAppStore = create<AppState>()(
           apiKeys: state.apiKeys.filter((entry) => entry.id !== id),
         })),
       setPrimaryProvider: (primaryProvider) => set({ primaryProvider }),
-      setModel: (model) => set({ model }),
-      setOpenaiModel: (openaiModel) => set({ openaiModel }),
-      setMistralModel: (mistralModel) => set({ mistralModel }),
+      setProviderModels: (provider, models, fetchedAt) =>
+        set((state) => ({
+          providerModels: { ...state.providerModels, [provider]: models },
+          providerModelsFetchedAt: {
+            ...state.providerModelsFetchedAt,
+            [provider]: fetchedAt,
+          },
+        })),
       setSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
       addImages: (images) =>
@@ -267,9 +277,8 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         apiKeys: state.apiKeys,
         primaryProvider: state.primaryProvider,
-        model: state.model,
-        openaiModel: state.openaiModel,
-        mistralModel: state.mistralModel,
+        providerModels: state.providerModels,
+        providerModelsFetchedAt: state.providerModelsFetchedAt,
         settings: state.settings,
         resultCache: state.resultCache,
       }),
@@ -277,6 +286,7 @@ export const useAppStore = create<AppState>()(
         const persisted = persistedState as (Partial<AppState> & {
           apiKey?: string;
         }) | undefined;
+        const validProviders: ApiProvider[] = ["gemini", "openai", "mistral"];
         const persistedPlatform = persisted?.settings?.platform;
         const validPlatform: "adobe" | "shutterstock" =
           persistedPlatform === "shutterstock" ? "shutterstock" : "adobe";
@@ -312,13 +322,33 @@ export const useAppStore = create<AppState>()(
             })
           );
         }
-        if (typeof merged.openaiModel !== "string" || !merged.openaiModel) {
-          merged.openaiModel = "gpt-4o";
+        if (
+          !merged.providerModels ||
+          typeof merged.providerModels !== "object"
+        ) {
+          merged.providerModels = { ...FALLBACK_MODELS };
         }
-        if (typeof merged.mistralModel !== "string" || !merged.mistralModel) {
-          merged.mistralModel = "pixtral-large-latest";
+        for (const provider of validProviders) {
+          const list = merged.providerModels[provider];
+          if (!Array.isArray(list) || list.length === 0) {
+            merged.providerModels[provider] = FALLBACK_MODELS[provider];
+          }
         }
-        const validProviders: ApiProvider[] = ["gemini", "openai", "mistral"];
+        if (
+          !merged.providerModelsFetchedAt ||
+          typeof merged.providerModelsFetchedAt !== "object"
+        ) {
+          merged.providerModelsFetchedAt = {
+            gemini: null,
+            openai: null,
+            mistral: null,
+          };
+        }
+        for (const provider of validProviders) {
+          if (typeof merged.providerModelsFetchedAt[provider] !== "number") {
+            merged.providerModelsFetchedAt[provider] = null;
+          }
+        }
         if (!validProviders.includes(merged.primaryProvider)) {
           merged.primaryProvider = "gemini";
         }

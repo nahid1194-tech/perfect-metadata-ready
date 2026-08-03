@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Menu, X } from "lucide-react"
 
+import { ensureModelCache } from "@/lib/models"
 import { ControlCard } from "@/components/dashboard/control-card"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
@@ -23,6 +24,10 @@ export function DashboardShell() {
   const setPlatform = useAppStore((state) => state.setSettings);
   const { run, pause, resume, stop, generating, queueState } = useGenerate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    void ensureModelCache();
+  }, []);
 
   useKeyboardShortcuts({
     onGenerate: () => run(),

@@ -8,9 +8,6 @@ import {
 } from "@/lib/api-keys";
 import { resultCacheKey } from "@/lib/cache";
 import {
-  GEMINI_MODELS,
-  MISTRAL_MODELS,
-  OPENAI_MODELS,
   friendlyApiError,
   generateLocal,
   generateWithApi,
@@ -18,7 +15,7 @@ import {
   generateWithOpenAI,
   isInvalidImageError,
   isKeyFailure,
-  isModelBusy,
+  isModelUnavailable,
   isNetworkError,
   isRateLimited,
   NoActiveKeyError,
@@ -29,6 +26,11 @@ import {
   testMistralConnection,
   testOpenAIConnection,
 } from "@/lib/generate";
+import {
+  ensureModelCache,
+  modelListFor,
+  refreshProviderModels,
+} from "@/lib/models";
 import type {
   ApiProvider,
   GenerationResult,
@@ -93,26 +95,11 @@ function providerLabel(provider: ApiProvider): string {
 const PROVIDER_ORDER: ApiProvider[] = ["gemini", "openai", "mistral"];
 
 function currentModel(provider: ApiProvider): string {
-  const store = useAppStore.getState();
-  switch (provider) {
-    case "gemini":
-      return store.model;
-    case "openai":
-      return store.openaiModel;
-    case "mistral":
-      return store.mistralModel;
-  }
+  return modelListFor(provider)[0] ?? "";
 }
 
 function modelChoices(provider: ApiProvider): string[] {
-  const models =
-    provider === "gemini"
-      ? GEMINI_MODELS
-      : provider === "openai"
-        ? OPENAI_MODELS
-        : MISTRAL_MODELS;
-  const selected = currentModel(provider);
-  return [selected, ...models.filter((model) => model !== selected)];
+  return modelListFor(provider);
 }
 
 let lastProviderSwitchToastAt = 0;
@@ -257,6 +244,7 @@ async function generateWithKeys(
   const models = modelChoices(provider);
 
   let sawRateLimit = false;
+  let sawModelUnavailable = false;
   let waitUntil = Infinity;
   let nonRateLimitError: unknown = null;
 
@@ -273,8 +261,15 @@ async function generateWithKeys(
     console.log(
       `[${provider}] Using API key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)})`
     );
-    updateDebug(provider, keyIndex, keys.length, null, maskKey(key.key));
+    updateDebug(
+      provider,
+      keyIndex,
+      keys.length,
+      models[0] ?? null,
+      maskKey(key.key)
+    );
 
+    let keyRateLimited = false;
     for (const model of models) {
       console.log(`[${provider}] Using model ${model}`);
       updateDebug(provider, keyIndex, keys.length, model, maskKey(key.key));
@@ -292,14 +287,21 @@ async function generateWithKeys(
           if (signal.aborted) throw error;
           if (isRateLimited(error)) {
             const until = Date.now() + rateLimitDelayMs(error);
-            markKeyRateLimited(key.id, until);
+            keyRateLimited = true;
             sawRateLimit = true;
             waitUntil = Math.min(waitUntil, until);
             console.log(
-              `[${provider}] API key ${maskKey(key.key)} rate-limited, switching to the next active key`
+              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), trying the next compatible model`
             );
-            notifyApiKeySwitch(provider, keyIndex + 1);
-            continue keyLoop;
+            break;
+          }
+          if (isModelUnavailable(error)) {
+            sawModelUnavailable = true;
+            nonRateLimitError ??= error;
+            console.log(
+              `[${provider}] Model ${model} unavailable/busy, trying the next compatible model`
+            );
+            break;
           }
           if (isNetworkError(error) && networkRetries < 2) {
             networkRetries++;
@@ -307,10 +309,6 @@ async function generateWithKeys(
             continue;
           }
           if (isInvalidImageError(error)) throw error;
-          if (isModelBusy(error)) {
-            nonRateLimitError ??= error;
-            break;
-          }
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
             notifyApiKeySwitch(provider, keyIndex + 1);
@@ -321,6 +319,23 @@ async function generateWithKeys(
         }
       }
     }
+
+    if (keyRateLimited) {
+      markKeyRateLimited(key.id, waitUntil);
+      console.log(
+        `[${provider}] All models rate-limited for key ${maskKey(key.key)}, switching to the next active key`
+      );
+    }
+    if (keyIndex < orderedKeys.length - 1) {
+      notifyApiKeySwitch(provider, keyIndex + 1);
+    }
+  }
+
+  if (sawModelUnavailable) {
+    console.log(
+      `[${provider}] All compatible models failed, refreshing the model list`
+    );
+    void refreshProviderModels(provider, { force: true });
   }
 
   if (sawRateLimit && nonRateLimitError === null) {
@@ -333,7 +348,7 @@ function isRetryableFailure(error: unknown): boolean {
   return (
     error instanceof RateLimitedError ||
     isRateLimited(error) ||
-    isModelBusy(error) ||
+    isModelUnavailable(error) ||
     isNetworkError(error)
   );
 }
@@ -586,6 +601,10 @@ export async function runQueue(
   const hasApiKeys = activeKeyCount > 0;
   updateDebug(null, null, activeKeyCount, null, null);
 
+  if (hasApiKeys) {
+    void ensureModelCache();
+  }
+
   active = true;
   stopRequested = false;
   pauseRequested = false;
@@ -733,6 +752,10 @@ export async function retryImage(imageId: string): Promise<void> {
   const image = store.images.find((item) => item.id === imageId);
   if (!image) {
     throw new Error("Image not found.");
+  }
+
+  if (activeKeys(store.apiKeys).length > 0) {
+    void ensureModelCache();
   }
 
   active = true;

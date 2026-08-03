@@ -4,6 +4,7 @@ import { useState } from "react"
 import { ChevronDown, KeyRound, Sparkles, Zap } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { bestModelFor } from "@/lib/models"
 import type { ApiProvider } from "@/lib/types"
 import { ApiKeySettings } from "@/components/dashboard/api-key-settings"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
@@ -17,8 +18,6 @@ const PROVIDER_LABEL: Record<ApiProvider, string> = {
   mistral: "Mistral AI",
 };
 
-const PROVIDER_ORDER: ApiProvider[] = ["gemini", "openai", "mistral"];
-
 function Diag({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
@@ -30,9 +29,6 @@ function Diag({ label, value }: { label: string; value: string }) {
 
 export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
-  const model = useAppStore((state) => state.model);
-  const openaiModel = useAppStore((state) => state.openaiModel);
-  const mistralModel = useAppStore((state) => state.mistralModel);
   const generating = useAppStore((state) => state.generating);
   const primaryProvider = useAppStore((state) => state.primaryProvider);
   const debugStatus = useAppStore((state) => state.debugStatus);
@@ -52,25 +48,7 @@ export function ControlCard() {
       entry.provider === "mistral" && entry.enabled && entry.key.trim().length > 0
   ).length;
   const activeKeyCount = geminiKeyCount + openaiKeyCount + mistralKeyCount;
-  const fallbackChain = PROVIDER_ORDER.filter(
-    (provider) => provider !== primaryProvider
-  );
-  const fallbackKeyCount = fallbackChain.reduce(
-    (sum, provider) =>
-      sum +
-      (provider === "gemini"
-        ? geminiKeyCount
-        : provider === "openai"
-          ? openaiKeyCount
-          : mistralKeyCount),
-    0
-  );
-  const primaryModel =
-    primaryProvider === "gemini"
-      ? model
-      : primaryProvider === "openai"
-        ? openaiModel
-        : mistralModel;
+  const primaryModel = bestModelFor(primaryProvider);
   const primaryKeyCount =
     primaryProvider === "gemini"
       ? geminiKeyCount
@@ -82,11 +60,7 @@ export function ControlCard() {
     : null;
   const activeModel =
     debugStatus.activeModel ??
-    (debugStatus.activeProvider === "openai"
-      ? openaiModel
-      : debugStatus.activeProvider === "mistral"
-        ? mistralModel
-        : model);
+    bestModelFor(debugStatus.activeProvider ?? primaryProvider);
 
   return (
     <div className="flex flex-col gap-4">
@@ -110,9 +84,7 @@ export function ControlCard() {
       >
         {activeKeyCount > 0 ? <Zap className="size-3" /> : <Sparkles className="size-3" />}
         {activeKeyCount > 0
-          ? `Primary ${PROVIDER_LABEL[primaryProvider]} ${primaryModel} (${primaryKeyCount}) · Fallback ${fallbackChain
-              .map((provider) => PROVIDER_LABEL[provider])
-              .join(" → ")} (${fallbackKeyCount})`
+          ? `Primary ${PROVIDER_LABEL[primaryProvider]} · ${primaryModel} (${primaryKeyCount} keys) · Auto-fallback on`
           : "Local engine"}
       </Badge>
 
@@ -141,25 +113,9 @@ export function ControlCard() {
             Diagnostics
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-xs">
-            <Diag
-              label="Primary provider"
-              value={PROVIDER_LABEL[primaryProvider]}
-            />
             <Diag label="Current provider" value={providerLabel ?? "–"} />
-            <Diag label="Active model" value={debugStatus.activeModel ?? "–"} />
+            <Diag label="Active model" value={activeModel ?? "–"} />
             <Diag label="Active API key" value={debugStatus.activeKeyMasked ?? "–"} />
-            <Diag
-              label="Remaining keys"
-              value={
-                debugStatus.remainingKeys != null
-                  ? `${debugStatus.remainingKeys}`
-                  : "–"
-              }
-            />
-            <Diag
-              label="Fallback status"
-              value={debugStatus.fallbackActive ? "Active" : "Standby"}
-            />
             <Diag
               label="Queue progress"
               value={generating ? `${batchCompleted}/${batchTotal}` : "Idle"}

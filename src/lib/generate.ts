@@ -33,27 +33,6 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 const MISTRAL_API_BASE = "https://api.mistral.ai/v1";
 
-export const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-pro",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-];
-
-export const OPENAI_MODELS = [
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-];
-
-export const MISTRAL_MODELS = [
-  "pixtral-large-latest",
-  "pixtral-12b-2409",
-  "mistral-large-latest",
-  "mistral-small-latest",
-];
-
 const DEFAULT_RATE_LIMIT_MS = 30_000;
 
 export class GeminiApiError extends Error {
@@ -244,6 +223,18 @@ export function isModelBusy(error: unknown): boolean {
     /model\s*busy|overloaded|service\s*unavailable|temporarily\s*unavailable|server\s*error|temporary\s*server/i.test(
       error.message
     )
+  );
+}
+
+export function isModelUnavailable(error: unknown): boolean {
+  if (!(error instanceof GeminiApiError)) return false;
+  if (isModelBusy(error)) return true;
+  if (error.status === 404) return true;
+  if (error.status === 400 && /model/i.test(error.message)) {
+    return !/image|inline_data|unsupported|corrupt|decoding/i.test(error.message);
+  }
+  return /model\s*(not\s*found|does\s*not\s*exist|not\s*supported|unavailable|no\s*longer)/i.test(
+    error.message
   );
 }
 

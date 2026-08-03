@@ -16,14 +16,12 @@ import {
 
 import { maskKey } from "@/lib/api-keys"
 import {
-  GEMINI_MODELS,
-  MISTRAL_MODELS,
-  OPENAI_MODELS,
   friendlyApiError,
   testGeminiConnection,
   testMistralConnection,
   testOpenAIConnection,
 } from "@/lib/generate"
+import { refreshProviderModels } from "@/lib/models"
 import type { ApiProvider } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -46,28 +44,27 @@ export function ApiKeySettings() {
         provider="gemini"
         title="Gemini API Keys"
         placeholder="AIza… (paste Gemini key)"
-        models={GEMINI_MODELS}
       />
       <div className="h-px bg-border" />
       <ProviderKeys
         provider="openai"
         title="OpenAI API Keys"
         placeholder="sk-… (paste OpenAI key)"
-        models={OPENAI_MODELS}
       />
       <div className="h-px bg-border" />
       <ProviderKeys
         provider="mistral"
         title="Mistral AI API Keys"
         placeholder="… (paste Mistral key)"
-        models={MISTRAL_MODELS}
       />
 
       <p className="text-xs text-muted-foreground">
-        The primary provider is tried first for every image. If its API keys
-        are rate-limited or exhausted, the queue rotates to the next key and
-        then switches to the fallback providers automatically, retries the same
-        image, and continues without losing progress. Keys are saved in browser
+        The primary provider is tried first for every image. The best compatible
+        model is detected automatically for each provider. If a model is
+        rate-limited or unavailable, the queue switches to the next compatible
+        model, then the next key, then the fallback providers automatically,
+        retries the same image, and continues without losing progress. Keys are
+        saved in browser
         localStorage and loaded automatically. If no active keys are added, a
         local engine generates results on-device.
       </p>
@@ -123,32 +120,16 @@ function ProviderKeys({
   provider,
   title,
   placeholder,
-  models,
 }: {
   provider: ApiProvider;
   title: string;
   placeholder: string;
-  models: string[];
 }) {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const addApiKey = useAppStore((state) => state.addApiKey);
   const updateApiKey = useAppStore((state) => state.updateApiKey);
   const removeApiKey = useAppStore((state) => state.removeApiKey);
   const primaryProvider = useAppStore((state) => state.primaryProvider);
-  const selectedModel = useAppStore((state) =>
-    provider === "gemini"
-      ? state.model
-      : provider === "openai"
-        ? state.openaiModel
-        : state.mistralModel
-  );
-  const setSelectedModel = useAppStore((state) =>
-    provider === "gemini"
-      ? state.setModel
-      : provider === "openai"
-        ? state.setOpenaiModel
-        : state.setMistralModel
-  );
 
   const providerKeys = apiKeys.filter((entry) => entry.provider === provider);
 
@@ -188,6 +169,7 @@ function ProviderKeys({
       toast("success", "Key added");
     }
     clearForm();
+    void refreshProviderModels(provider, { force: true });
   };
 
   const startEdit = (id: string) => {
@@ -225,6 +207,7 @@ function ProviderKeys({
       }
       toast("success", "Connection successful", `${count} models available.`);
       clearForm();
+      void refreshProviderModels(provider, { force: true });
     } catch (error) {
       setStatus("failed");
       toast("error", "Connection failed", friendlyApiError(error));
@@ -349,21 +332,6 @@ function ProviderKeys({
               {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
             </button>
           </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor={`model-${provider}`}>Model</Label>
-          <Select
-            id={`model-${provider}`}
-            value={selectedModel}
-            onChange={(event) => setSelectedModel(event.target.value)}
-          >
-            {models.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </Select>
         </div>
 
         <div className="flex flex-wrap gap-2">

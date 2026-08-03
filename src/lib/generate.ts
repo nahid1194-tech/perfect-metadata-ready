@@ -27,6 +27,11 @@ import {
   describeBackground,
   detectBackground,
 } from "@/lib/background";
+import {
+  noteProviderRateLimit,
+  noteProviderSuccess,
+  waitForProviderSlot,
+} from "@/lib/rate-limiter";
 import { useAppStore } from "@/store/use-app-store";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -342,6 +347,7 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
+  generationSpeed: "smart",
 };
 
 function hashString(input: string): number {
@@ -1249,6 +1255,7 @@ async function callGemini(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
+  await waitForProviderSlot("gemini", signal);
   let response: Response;
   try {
     response = await fetch(
@@ -1287,15 +1294,18 @@ async function callGemini(
   });
 
   if (!response.ok) {
-    throw buildApiError(
+    const error = buildApiError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`,
       response.headers.get("retry-after")
     );
+    if (isRateLimited(error)) noteProviderRateLimit("gemini");
+    throw error;
   }
 
+  noteProviderSuccess("gemini");
   const json = data as GeminiCandidatesBody | null;
   return (
     json?.candidates?.[0]?.content?.parts
@@ -1380,6 +1390,7 @@ async function callOpenAI(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
+  await waitForProviderSlot("openai", signal);
   let response: Response;
   try {
     const content: unknown[] = imageUrl
@@ -1425,14 +1436,17 @@ async function callOpenAI(
   });
 
   if (!response.ok) {
-    throw buildOpenAIError(
+    const error = buildOpenAIError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`
     );
+    if (isRateLimited(error)) noteProviderRateLimit("openai");
+    throw error;
   }
 
+  noteProviderSuccess("openai");
   const json = data as
     | { choices?: Array<{ message?: { content?: string } }> }
     | null;
@@ -1485,6 +1499,7 @@ async function callMistral(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
+  await waitForProviderSlot("mistral", signal);
   let response: Response;
   try {
     const content: unknown[] = imageUrl
@@ -1530,14 +1545,17 @@ async function callMistral(
   });
 
   if (!response.ok) {
-    throw buildMistralError(
+    const error = buildMistralError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`
     );
+    if (isRateLimited(error)) noteProviderRateLimit("mistral");
+    throw error;
   }
 
+  noteProviderSuccess("mistral");
   const json = data as
     | { choices?: Array<{ message?: { content?: string } }> }
     | null;

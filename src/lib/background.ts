@@ -216,15 +216,15 @@ export async function detectBackground(
 export function describeBackground(detection: BackgroundDetection): string {
   switch (detection.kind) {
     case "transparent":
-      return "The image has a TRANSPARENT background (alpha channel confirmed by pixel analysis).";
+      return 'The image has a TRANSPARENT background (alpha channel confirmed by pixel analysis). Set "transparent": true, "isolated": true, "whiteBackground": false, "blackBackground": false.';
     case "white":
-      return "The image has a plain WHITE background (confirmed by pixel analysis).";
+      return 'The image has a plain WHITE background (confirmed by pixel analysis). Set "whiteBackground": true, "isolated": true, "transparent": false, "blackBackground": false.';
     case "black":
-      return "The image has a plain BLACK background (confirmed by pixel analysis).";
+      return 'The image has a plain BLACK background (confirmed by pixel analysis). Set "blackBackground": true, "isolated": true, "transparent": false, "whiteBackground": false.';
     case "solid":
-      return `The image has a plain SOLID ${detection.color.toUpperCase()} background (confirmed by pixel analysis).`;
+      return `The image has a plain SOLID ${detection.color.toUpperCase()} background (confirmed by pixel analysis). Set "isolated": true, "transparent": false, "whiteBackground": false, "blackBackground": false.`;
     default:
-      return "The image background is a real scene with visible detail (non-uniform).";
+      return 'The image background is a real scene with visible detail (non-uniform). Set "transparent": false, "whiteBackground": false, "blackBackground": false, "isolated": false.';
   }
 }
 

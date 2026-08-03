@@ -235,6 +235,34 @@ export function rateLimitDelayMs(error: unknown): number {
   return DEFAULT_RATE_LIMIT_MS;
 }
 
+export function isProviderSwitchTrigger(error: unknown): boolean {
+  return isRateLimited(error) || isModelBusy(error) || isKeyFailure(error);
+}
+
+export function providerSwitchReason(error: unknown): string {
+  if (!(error instanceof GeminiApiError)) {
+    return error instanceof Error ? error.message : "Unknown error";
+  }
+  if (isRateLimited(error)) {
+    if (error.status === 429) return "HTTP 429 Rate Limited";
+    if (error.code === "RESOURCE_EXHAUSTED")
+      return "Quota exceeded (RESOURCE_EXHAUSTED)";
+    return "Rate limit or quota exceeded";
+  }
+  if (isModelBusy(error)) {
+    if (error.status === 503) return "503 Service Unavailable";
+    if (error.status === 502) return "502 Bad Gateway";
+    if (error.status === 500) return "500 Server Error";
+    return "Model busy / temporary server error";
+  }
+  if (isKeyFailure(error)) {
+    if (error.status === 401) return "Invalid API Key (401)";
+    if (error.status === 403) return "API key permission denied (403)";
+    return "Invalid or exhausted API key";
+  }
+  return error.message || `HTTP ${error.status}`;
+}
+
 export function friendlyApiError(error: unknown): string {
   if (error instanceof GeminiApiError) {
     const raw = error.message;

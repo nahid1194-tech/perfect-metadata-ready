@@ -17,9 +17,11 @@ import {
 import { maskKey } from "@/lib/api-keys"
 import {
   GEMINI_MODELS,
+  MISTRAL_MODELS,
   OPENAI_MODELS,
   friendlyApiError,
   testGeminiConnection,
+  testMistralConnection,
   testOpenAIConnection,
 } from "@/lib/generate"
 import type { ApiProvider } from "@/lib/types"
@@ -53,14 +55,21 @@ export function ApiKeySettings() {
         placeholder="sk-… (paste OpenAI key)"
         models={OPENAI_MODELS}
       />
+      <div className="h-px bg-border" />
+      <ProviderKeys
+        provider="mistral"
+        title="Mistral AI API Keys"
+        placeholder="… (paste Mistral key)"
+        models={MISTRAL_MODELS}
+      />
 
       <p className="text-xs text-muted-foreground">
         The primary provider is tried first for every image. If its API keys
-        are rate-limited or exhausted, the queue switches to the fallback
-        provider automatically, retries the same image, and continues without
-        losing progress. Keys are saved in browser localStorage and loaded
-        automatically. If no active keys are added, a local engine generates
-        results on-device.
+        are rate-limited or exhausted, the queue rotates to the next key and
+        then switches to the fallback providers automatically, retries the same
+        image, and continues without losing progress. Keys are saved in browser
+        localStorage and loaded automatically. If no active keys are added, a
+        local engine generates results on-device.
       </p>
     </div>
   );
@@ -77,22 +86,34 @@ function PrimaryProviderPicker() {
         id="primary-provider"
         value={primaryProvider}
         onChange={(event) => {
+          const value = event.target.value;
           const next: ApiProvider =
-            event.target.value === "openai" ? "openai" : "gemini";
+            value === "openai"
+              ? "openai"
+              : value === "mistral"
+                ? "mistral"
+                : "gemini";
           setPrimaryProvider(next);
           toast(
             "info",
             "Primary provider",
-            `Primary Provider: ${next === "gemini" ? "Gemini" : "OpenAI"}`
+            `Primary Provider: ${
+              next === "gemini"
+                ? "Gemini"
+                : next === "openai"
+                  ? "OpenAI"
+                  : "Mistral AI"
+            }`
           );
         }}
       >
         <option value="gemini">Gemini</option>
         <option value="openai">OpenAI</option>
+        <option value="mistral">Mistral AI</option>
       </Select>
       <p className="text-xs text-muted-foreground">
-        Used first for every image; the other provider is used as automatic
-        fallback.
+        Used first for every image; the remaining providers are used as
+        automatic fallbacks.
       </p>
     </div>
   );
@@ -114,11 +135,19 @@ function ProviderKeys({
   const updateApiKey = useAppStore((state) => state.updateApiKey);
   const removeApiKey = useAppStore((state) => state.removeApiKey);
   const primaryProvider = useAppStore((state) => state.primaryProvider);
-  const selectedModel = useAppStore(
-    (state) => (provider === "gemini" ? state.model : state.openaiModel)
+  const selectedModel = useAppStore((state) =>
+    provider === "gemini"
+      ? state.model
+      : provider === "openai"
+        ? state.openaiModel
+        : state.mistralModel
   );
   const setSelectedModel = useAppStore((state) =>
-    provider === "gemini" ? state.setModel : state.setOpenaiModel
+    provider === "gemini"
+      ? state.setModel
+      : provider === "openai"
+        ? state.setOpenaiModel
+        : state.setMistralModel
   );
 
   const providerKeys = apiKeys.filter((entry) => entry.provider === provider);
@@ -179,7 +208,9 @@ function ProviderKeys({
       const count =
         provider === "gemini"
           ? await testGeminiConnection(trimmed)
-          : await testOpenAIConnection(trimmed);
+          : provider === "openai"
+            ? await testOpenAIConnection(trimmed)
+            : await testMistralConnection(trimmed);
       setModelCount(count);
       setStatus("connected");
       if (editingId) {

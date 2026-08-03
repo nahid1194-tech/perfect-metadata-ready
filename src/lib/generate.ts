@@ -31,6 +31,7 @@ import { useAppStore } from "@/store/use-app-store";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
+const MISTRAL_API_BASE = "https://api.mistral.ai/v1";
 
 export const GEMINI_MODELS = [
   "gemini-2.5-flash",
@@ -44,6 +45,13 @@ export const OPENAI_MODELS = [
   "gpt-4o-mini",
   "gpt-4.1",
   "gpt-4.1-mini",
+];
+
+export const MISTRAL_MODELS = [
+  "pixtral-large-latest",
+  "pixtral-12b-2409",
+  "mistral-large-latest",
+  "mistral-small-latest",
 ];
 
 const DEFAULT_RATE_LIMIT_MS = 30_000;
@@ -178,6 +186,36 @@ function buildOpenAIError(
   return error;
 }
 
+type MistralApiErrorBody = {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string | number | null;
+  };
+  message?: string;
+  type?: string;
+  code?: string | number | null;
+};
+
+function buildMistralError(
+  data: unknown,
+  rawBody: string,
+  status: number,
+  fallback: string
+): GeminiApiError {
+  const payload = data as MistralApiErrorBody | null;
+  const nested = payload?.error;
+  const error = new GeminiApiError(
+    nested?.message ?? payload?.message ?? fallback,
+    status,
+    nested?.code != null
+      ? String(nested.code)
+      : nested?.type ?? (payload?.code != null ? String(payload.code) : payload?.type),
+    data ?? rawBody
+  );
+  return error;
+}
+
 export function isKeyFailure(error: unknown): boolean {
   if (!(error instanceof GeminiApiError)) return false;
   const message = error.message;
@@ -284,7 +322,7 @@ export function friendlyApiError(error: unknown): string {
       return `Rate Limit Reached. Switching to the next API key... — ${raw}`;
     }
     if (error.status === 503 || isModelBusy(error)) {
-      return `Gemini Model Busy. Retrying with another model... — ${raw}`;
+      return `Model Busy. Retrying with another model... — ${raw}`;
     }
     if (isInvalidImageError(error)) {
       return `Unsupported or corrupted image — ${raw}`;
@@ -601,7 +639,7 @@ export function generateLocal(
     imageId: image.id,
     createdAt: new Date().toISOString(),
     imageName: image.name,
-    metadata,
+    metadata: applySettings(metadata, fullSettings),
   };
 }
 
@@ -748,6 +786,48 @@ export async function testOpenAIConnection(apiKey: string): Promise<number> {
 
   if (!response.ok) {
     throw buildOpenAIError(
+      data,
+      rawBody,
+      response.status,
+      `Connection failed (${response.status})`
+    );
+  }
+
+  const json = data as { data?: unknown[] } | null;
+  return Array.isArray(json?.data) ? json.data.length : 0;
+}
+
+export async function testMistralConnection(apiKey: string): Promise<number> {
+  let response: Response;
+  try {
+    response = await fetch(`${MISTRAL_API_BASE}/models`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+  } catch (error) {
+    console.error("[Mistral] Network error while testing the connection", error);
+    throw new GeminiApiError(
+      error instanceof Error ? error.message : "Network request failed",
+      0
+    );
+  }
+
+  const rawBody = await response.text();
+  let data: unknown = null;
+  try {
+    data = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    data = null;
+  }
+
+  console.log("[Mistral] Connection test response", {
+    status: response.status,
+    statusText: response.statusText,
+    body: data ?? rawBody,
+  });
+
+  if (!response.ok) {
+    throw buildMistralError(
       data,
       rawBody,
       response.status,
@@ -1395,6 +1475,111 @@ export async function generateWithOpenAI(
     },
     callText: (prompt, temperature) =>
       callOpenAI(prompt, undefined, apiKey, model, temperature, signal),
+  });
+
+  return {
+    id: crypto.randomUUID(),
+    imageId: image.id,
+    createdAt: new Date().toISOString(),
+    imageName: image.name,
+    metadata: applySettings(metadata, fullSettings),
+  };
+}
+
+async function callMistral(
+  text: string,
+  imageUrl: string | undefined,
+  apiKey: string,
+  model: string,
+  temperature: number,
+  signal?: AbortSignal
+): Promise<string> {
+  let response: Response;
+  try {
+    const content: unknown[] = imageUrl
+      ? [
+          { type: "text", text },
+          { type: "image_url", image_url: { url: imageUrl } },
+        ]
+      : [{ type: "text", text }];
+    response = await fetch(`${MISTRAL_API_BASE}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal,
+      body: JSON.stringify({
+        model,
+        temperature,
+        messages: [{ role: "user", content }],
+      }),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.error("[Mistral] Network error while calling the API", error);
+    throw new GeminiApiError(
+      error instanceof Error ? error.message : "Network request failed",
+      0
+    );
+  }
+
+  const rawBody = await response.text();
+  let data: unknown = null;
+  try {
+    data = rawBody ? JSON.parse(rawBody) : null;
+  } catch {
+    data = null;
+  }
+
+  console.log("[Mistral] API response", {
+    status: response.status,
+    statusText: response.statusText,
+    body: data ?? rawBody,
+  });
+
+  if (!response.ok) {
+    throw buildMistralError(
+      data,
+      rawBody,
+      response.status,
+      `API request failed (${response.status})`
+    );
+  }
+
+  const json = data as
+    | { choices?: Array<{ message?: { content?: string } }> }
+    | null;
+  return json?.choices?.[0]?.message?.content ?? "";
+}
+
+export async function generateWithMistral(
+  image: ImageAsset,
+  apiKey: string,
+  model = "pixtral-large-latest",
+  settings: Partial<GenerationSettings> = {},
+  signal?: AbortSignal
+): Promise<GenerationResult> {
+  const fullSettings: GenerationSettings = {
+    ...DEFAULT_GENERATION_SETTINGS,
+    ...settings,
+  };
+  const seed = hashString(image.name + image.size);
+  const fallback = buildMetadata(image, seed);
+
+  const metadata = await runGenerationPipeline({
+    image,
+    fallback,
+    settings: fullSettings,
+    callAnalysis: async (prompt) => {
+      const { dataUrl, mimeType } = await ensureAnalysisImage(image);
+      const imageUrl = dataUrl.startsWith("data:")
+        ? dataUrl
+        : `data:${mimeType};base64,${dataUrl}`;
+      return callMistral(prompt, imageUrl, apiKey, model, 0.4, signal);
+    },
+    callText: (prompt, temperature) =>
+      callMistral(prompt, undefined, apiKey, model, temperature, signal),
   });
 
   return {

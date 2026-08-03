@@ -14,7 +14,10 @@ import { useAppStore } from "@/store/use-app-store"
 const PROVIDER_LABEL: Record<ApiProvider, string> = {
   gemini: "Gemini",
   openai: "OpenAI",
+  mistral: "Mistral AI",
 };
+
+const PROVIDER_ORDER: ApiProvider[] = ["gemini", "openai", "mistral"];
 
 function Diag({ label, value }: { label: string; value: string }) {
   return (
@@ -29,9 +32,12 @@ export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const model = useAppStore((state) => state.model);
   const openaiModel = useAppStore((state) => state.openaiModel);
+  const mistralModel = useAppStore((state) => state.mistralModel);
   const generating = useAppStore((state) => state.generating);
   const primaryProvider = useAppStore((state) => state.primaryProvider);
   const debugStatus = useAppStore((state) => state.debugStatus);
+  const batchCompleted = useAppStore((state) => state.batchCompleted);
+  const batchTotal = useAppStore((state) => state.batchTotal);
   const [keysOpen, setKeysOpen] = useState(false);
   const geminiKeyCount = apiKeys.filter(
     (entry) =>
@@ -41,21 +47,46 @@ export function ControlCard() {
     (entry) =>
       entry.provider === "openai" && entry.enabled && entry.key.trim().length > 0
   ).length;
-  const activeKeyCount = geminiKeyCount + openaiKeyCount;
-  const fallbackProvider: ApiProvider =
-    primaryProvider === "gemini" ? "openai" : "gemini";
-  const primaryModel = primaryProvider === "gemini" ? model : openaiModel;
-  const fallbackModel = primaryProvider === "gemini" ? openaiModel : model;
+  const mistralKeyCount = apiKeys.filter(
+    (entry) =>
+      entry.provider === "mistral" && entry.enabled && entry.key.trim().length > 0
+  ).length;
+  const activeKeyCount = geminiKeyCount + openaiKeyCount + mistralKeyCount;
+  const fallbackChain = PROVIDER_ORDER.filter(
+    (provider) => provider !== primaryProvider
+  );
+  const fallbackKeyCount = fallbackChain.reduce(
+    (sum, provider) =>
+      sum +
+      (provider === "gemini"
+        ? geminiKeyCount
+        : provider === "openai"
+          ? openaiKeyCount
+          : mistralKeyCount),
+    0
+  );
+  const primaryModel =
+    primaryProvider === "gemini"
+      ? model
+      : primaryProvider === "openai"
+        ? openaiModel
+        : mistralModel;
   const primaryKeyCount =
-    primaryProvider === "gemini" ? geminiKeyCount : openaiKeyCount;
-  const fallbackKeyCount =
-    primaryProvider === "gemini" ? openaiKeyCount : geminiKeyCount;
+    primaryProvider === "gemini"
+      ? geminiKeyCount
+      : primaryProvider === "openai"
+        ? openaiKeyCount
+        : mistralKeyCount;
   const providerLabel = debugStatus.activeProvider
     ? PROVIDER_LABEL[debugStatus.activeProvider]
     : null;
   const activeModel =
     debugStatus.activeModel ??
-    (debugStatus.activeProvider === "openai" ? openaiModel : model);
+    (debugStatus.activeProvider === "openai"
+      ? openaiModel
+      : debugStatus.activeProvider === "mistral"
+        ? mistralModel
+        : model);
 
   return (
     <div className="flex flex-col gap-4">
@@ -79,7 +110,9 @@ export function ControlCard() {
       >
         {activeKeyCount > 0 ? <Zap className="size-3" /> : <Sparkles className="size-3" />}
         {activeKeyCount > 0
-          ? `Primary ${PROVIDER_LABEL[primaryProvider]} ${primaryModel} (${primaryKeyCount}) · Fallback ${PROVIDER_LABEL[fallbackProvider]} ${fallbackModel} (${fallbackKeyCount})`
+          ? `Primary ${PROVIDER_LABEL[primaryProvider]} ${primaryModel} (${primaryKeyCount}) · Fallback ${fallbackChain
+              .map((provider) => PROVIDER_LABEL[provider])
+              .join(" → ")} (${fallbackKeyCount})`
           : "Local engine"}
       </Badge>
 
@@ -126,6 +159,10 @@ export function ControlCard() {
             <Diag
               label="Fallback status"
               value={debugStatus.fallbackActive ? "Active" : "Standby"}
+            />
+            <Diag
+              label="Queue progress"
+              value={generating ? `${batchCompleted}/${batchTotal}` : "Idle"}
             />
           </div>
         </div>

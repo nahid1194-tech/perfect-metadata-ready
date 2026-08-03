@@ -34,6 +34,7 @@ type AppState = {
   primaryProvider: ApiProvider;
   model: string;
   openaiModel: string;
+  mistralModel: string;
   images: ImageAsset[];
   selectedIds: string[];
   results: GenerationResult[];
@@ -56,6 +57,7 @@ type AppState = {
   setPrimaryProvider: (provider: ApiProvider) => void;
   setModel: (model: string) => void;
   setOpenaiModel: (model: string) => void;
+  setMistralModel: (model: string) => void;
   setSettings: (patch: Partial<GenerationSettings>) => void;
   addImages: (images: ImageAsset[]) => void;
   updateImage: (id: string, patch: Partial<ImageAsset>) => void;
@@ -115,6 +117,7 @@ export const useAppStore = create<AppState>()(
       primaryProvider: "gemini",
       model: "gemini-2.5-flash",
       openaiModel: "gpt-4o",
+      mistralModel: "pixtral-large-latest",
       images: [],
       selectedIds: [],
       results: [],
@@ -146,6 +149,7 @@ export const useAppStore = create<AppState>()(
       setPrimaryProvider: (primaryProvider) => set({ primaryProvider }),
       setModel: (model) => set({ model }),
       setOpenaiModel: (openaiModel) => set({ openaiModel }),
+      setMistralModel: (mistralModel) => set({ mistralModel }),
       setSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
       addImages: (images) =>
@@ -265,6 +269,7 @@ export const useAppStore = create<AppState>()(
         primaryProvider: state.primaryProvider,
         model: state.model,
         openaiModel: state.openaiModel,
+        mistralModel: state.mistralModel,
         settings: state.settings,
         resultCache: state.resultCache,
       }),
@@ -299,7 +304,9 @@ export const useAppStore = create<AppState>()(
           merged.apiKeys = merged.apiKeys.map(
             (entry: ApiKeyEntry): ApiKeyEntry => ({
               id: entry.id,
-              provider: entry.provider ?? "gemini",
+              provider: validProviders.includes(entry.provider)
+                ? entry.provider
+                : "gemini",
               key: entry.key,
               enabled: entry.enabled ?? true,
             })
@@ -308,7 +315,11 @@ export const useAppStore = create<AppState>()(
         if (typeof merged.openaiModel !== "string" || !merged.openaiModel) {
           merged.openaiModel = "gpt-4o";
         }
-        if (merged.primaryProvider !== "gemini" && merged.primaryProvider !== "openai") {
+        if (typeof merged.mistralModel !== "string" || !merged.mistralModel) {
+          merged.mistralModel = "pixtral-large-latest";
+        }
+        const validProviders: ApiProvider[] = ["gemini", "openai", "mistral"];
+        if (!validProviders.includes(merged.primaryProvider)) {
           merged.primaryProvider = "gemini";
         }
         if (Array.isArray(merged.results)) {

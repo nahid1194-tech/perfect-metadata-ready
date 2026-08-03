@@ -9,22 +9,24 @@ import {
 import { resultCacheKey } from "@/lib/cache";
 import {
   GEMINI_MODELS,
+  MISTRAL_MODELS,
   OPENAI_MODELS,
   friendlyApiError,
   generateLocal,
   generateWithApi,
+  generateWithMistral,
   generateWithOpenAI,
   isInvalidImageError,
   isKeyFailure,
   isModelBusy,
   isNetworkError,
-  isProviderSwitchTrigger,
   isRateLimited,
   NoActiveKeyError,
   providerSwitchReason,
   RateLimitedError,
   rateLimitDelayMs,
   testGeminiConnection,
+  testMistralConnection,
   testOpenAIConnection,
 } from "@/lib/generate";
 import type {
@@ -78,7 +80,39 @@ function updateDebug(
 }
 
 function providerLabel(provider: ApiProvider): string {
-  return provider === "gemini" ? "Gemini" : "OpenAI";
+  switch (provider) {
+    case "gemini":
+      return "Gemini";
+    case "openai":
+      return "OpenAI";
+    case "mistral":
+      return "Mistral AI";
+  }
+}
+
+const PROVIDER_ORDER: ApiProvider[] = ["gemini", "openai", "mistral"];
+
+function currentModel(provider: ApiProvider): string {
+  const store = useAppStore.getState();
+  switch (provider) {
+    case "gemini":
+      return store.model;
+    case "openai":
+      return store.openaiModel;
+    case "mistral":
+      return store.mistralModel;
+  }
+}
+
+function modelChoices(provider: ApiProvider): string[] {
+  const models =
+    provider === "gemini"
+      ? GEMINI_MODELS
+      : provider === "openai"
+        ? OPENAI_MODELS
+        : MISTRAL_MODELS;
+  const selected = currentModel(provider);
+  return [selected, ...models.filter((model) => model !== selected)];
 }
 
 let lastProviderSwitchToastAt = 0;
@@ -210,8 +244,7 @@ async function generateWithKeys(
   provider: ApiProvider,
   image: ImageAsset,
   settings: GenerationSettings,
-  signal: AbortSignal,
-  opts: { stopOnProviderError?: boolean } = {}
+  signal: AbortSignal
 ): Promise<GenerationResult> {
   const store = useAppStore.getState();
   const keys = activeKeys(store.apiKeys, provider);
@@ -221,13 +254,7 @@ async function generateWithKeys(
   pruneKeyCooldowns(now);
   const orderedKeys = rotateKeys(keys);
 
-  const models =
-    provider === "gemini"
-      ? [store.model, ...GEMINI_MODELS.filter((model) => model !== store.model)]
-      : [
-          store.openaiModel,
-          ...OPENAI_MODELS.filter((model) => model !== store.openaiModel),
-        ];
+  const models = modelChoices(provider);
 
   let sawRateLimit = false;
   let waitUntil = Infinity;
@@ -254,17 +281,15 @@ async function generateWithKeys(
       let networkRetries = 0;
       for (;;) {
         try {
-          return await (provider === "gemini"
-            ? generateWithApi(image, key.key, model, settings, signal)
-            : generateWithOpenAI(image, key.key, model, settings, signal));
+          const generate =
+            provider === "gemini"
+              ? generateWithApi
+              : provider === "openai"
+                ? generateWithOpenAI
+                : generateWithMistral;
+          return await generate(image, key.key, model, settings, signal);
         } catch (error) {
           if (signal.aborted) throw error;
-          if (opts.stopOnProviderError && isProviderSwitchTrigger(error)) {
-            if (isRateLimited(error)) {
-              markKeyRateLimited(key.id, Date.now() + rateLimitDelayMs(error));
-            }
-            throw error;
-          }
           if (isRateLimited(error)) {
             const until = Date.now() + rateLimitDelayMs(error);
             markKeyRateLimited(key.id, until);
@@ -324,68 +349,42 @@ async function generateWithProviders(
   signal: AbortSignal
 ): Promise<GenerationResult> {
   const store = useAppStore.getState();
-  const geminiKeys = activeKeys(store.apiKeys, "gemini");
-  const openaiKeys = activeKeys(store.apiKeys, "openai");
-  if (geminiKeys.length === 0 && openaiKeys.length === 0) {
-    throw new NoActiveKeyError();
-  }
-
-  const primary: ApiProvider = preferredProvider;
-  const fallback: ApiProvider = primary === "gemini" ? "openai" : "gemini";
+  const current: ApiProvider = preferredProvider;
+  const rest = PROVIDER_ORDER.filter((provider) => provider !== current);
 
   const order: ApiProvider[] = [];
-  if (primary === "gemini" ? geminiKeys.length > 0 : openaiKeys.length > 0) {
-    order.push(primary);
+  if (activeKeys(store.apiKeys, current).length > 0) order.push(current);
+  for (const provider of rest) {
+    if (activeKeys(store.apiKeys, provider).length > 0) order.push(provider);
   }
-  if (fallback === "gemini" ? geminiKeys.length > 0 : openaiKeys.length > 0) {
-    order.push(fallback);
-  }
+  if (order.length === 0) throw new NoActiveKeyError();
 
   let sawRateLimit = false;
   let lastError: unknown = null;
 
   for (let index = 0; index < order.length; index++) {
     const provider = order[index];
-    const isPrimary = index === 0 && order.length > 1;
     try {
-      const result = await generateWithKeys(provider, image, settings, signal, {
-        stopOnProviderError: isPrimary,
-      });
-      if (provider === primary && preferredProvider !== primary) {
-        preferredProvider = primary;
-        logProviderState(
-          primary,
-          0,
-          activeKeys(store.apiKeys, primary).length,
-          primary === "gemini" ? store.model : store.openaiModel,
-          maskKey(activeKeys(store.apiKeys, primary)[0]?.key ?? "")
-        );
-        notifyProviderSwitch(
-          fallback,
-          primary,
-          `${providerLabel(primary)} became available again`,
-          true
-        );
-      }
-      return result;
+      return await generateWithKeys(provider, image, settings, signal);
     } catch (error) {
       if (signal.aborted) throw error;
       sawRateLimit ||= isRetryableFailure(error);
       lastError = error;
-      if (isPrimary && isProviderSwitchTrigger(error)) {
-        preferredProvider = fallback;
+      if (index < order.length - 1) {
+        const next = order[index + 1];
+        preferredProvider = next;
         logProviderState(
-          fallback,
+          next,
           0,
-          activeKeys(store.apiKeys, fallback).length,
-          fallback === "gemini" ? store.model : store.openaiModel,
-          maskKey(activeKeys(store.apiKeys, fallback)[0]?.key ?? "")
+          activeKeys(store.apiKeys, next).length,
+          currentModel(next),
+          maskKey(activeKeys(store.apiKeys, next)[0]?.key ?? "")
         );
-        notifyProviderSwitch(provider, fallback, providerSwitchReason(error));
+        notifyProviderSwitch(provider, next, providerSwitchReason(error));
         toast(
           "info",
           "Using fallback provider",
-          "Retrying image using fallback provider..."
+          `Retrying image using ${providerLabel(next)}...`
         );
       }
     }
@@ -409,17 +408,21 @@ async function recoveryProbeLoop(): Promise<void> {
       const primaryKeys = activeKeys(store.apiKeys, primary);
       if (primaryKeys.length === 0) continue;
       const key = primaryKeys[0];
+      const testConnection =
+        primary === "gemini"
+          ? testGeminiConnection
+          : primary === "openai"
+            ? testOpenAIConnection
+            : testMistralConnection;
       try {
-        await (primary === "gemini"
-          ? testGeminiConnection(key.key)
-          : testOpenAIConnection(key.key));
+        await testConnection(key.key);
         const from = preferredProvider;
         preferredProvider = primary;
         logProviderState(
           primary,
           0,
           primaryKeys.length,
-          primary === "gemini" ? store.model : store.openaiModel,
+          currentModel(primary),
           maskKey(key.key)
         );
         notifyProviderSwitch(

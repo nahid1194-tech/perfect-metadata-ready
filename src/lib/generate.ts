@@ -17,18 +17,15 @@ import {
   isValidAdobeCategory,
   normalizeShutterstockCategories,
 } from "@/lib/stock-spec";
-import {
-  IMAGE_API_MAX_DIMENSION,
-  IMAGE_MAX_BYTES,
-  compressImageDataUrl,
-} from "@/lib/image-process";
+import { prepareImageForApi } from "@/lib/image-process";
 import {
   backgroundRules,
   describeBackground,
   detectBackground,
+  type BackgroundDetection,
 } from "@/lib/background";
+import { imageContentHash } from "@/lib/cache";
 import { waitForProviderSlot } from "@/lib/rate-limiter";
-import { useAppStore } from "@/store/use-app-store";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -1146,23 +1143,35 @@ function parseMetadata(text: string): {
   }
 }
 
-function estimateDataUrlBytes(dataUrl: string): number {
-  const comma = dataUrl.indexOf(",");
-  const payload = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
-  return Math.floor(payload.length * 0.75);
+type PreparedAnalysis = {
+  dataUrl: string;
+  mimeType: string;
+  background: BackgroundDetection;
+};
+
+const preparedAnalysisCache = new Map<string, Promise<PreparedAnalysis>>();
+
+async function getPreparedAnalysis(image: ImageAsset): Promise<PreparedAnalysis> {
+  const cached = preparedAnalysisCache.get(image.id);
+  if (cached) return cached;
+  const promise = (async () => {
+    const prepared = await prepareImageForApi(image);
+    const background = await detectBackground(prepared.dataUrl);
+    return { ...prepared, background };
+  })();
+  preparedAnalysisCache.set(image.id, promise);
+  return promise;
+}
+
+export async function prepareImage(image: ImageAsset): Promise<void> {
+  await getPreparedAnalysis(image);
+  await imageContentHash(image);
 }
 
 async function ensureAnalysisImage(
   image: ImageAsset
 ): Promise<{ dataUrl: string; mimeType: string }> {
-  const isRasterSource = /^data:image\/(?!svg\+xml)/i.test(image.dataUrl);
-  if (isRasterSource && estimateDataUrlBytes(image.dataUrl) <= IMAGE_MAX_BYTES) {
-    return {
-      dataUrl: image.dataUrl,
-      mimeType: image.type.startsWith("image/") ? image.type : "image/png",
-    };
-  }
-  return ensureApiImage(image);
+  return prepareImageForApi(image);
 }
 
 async function runGenerationPipeline(args: {
@@ -1175,13 +1184,7 @@ async function runGenerationPipeline(args: {
   const { image, fallback, settings, callAnalysis, callText } = args;
   const settingsPrompt = buildSettingsPrompt(settings);
 
-  let backgroundSource = image.dataUrl;
-  try {
-    backgroundSource = (await ensureAnalysisImage(image)).dataUrl;
-  } catch {
-    // keep the original data URL
-  }
-  const background = await detectBackground(backgroundSource);
+  const { background } = await getPreparedAnalysis(image);
   const backgroundHint = describeBackground(background);
   const bgRules = backgroundRules(background);
 
@@ -1334,32 +1337,6 @@ async function callGemini(
       ?.map((part) => part.text ?? "")
       .join("") ?? ""
   );
-}
-
-async function ensureApiImage(
-  image: ImageAsset
-): Promise<{ dataUrl: string; mimeType: string }> {
-  if (image.apiDataUrl && image.apiMimeType) {
-    return { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
-  }
-  try {
-    const compressed = await compressImageDataUrl(
-      image.dataUrl,
-      IMAGE_MAX_BYTES,
-      IMAGE_API_MAX_DIMENSION
-    );
-    useAppStore.getState().updateImage(image.id, {
-      apiDataUrl: compressed.dataUrl,
-      apiMimeType: compressed.mimeType,
-    });
-    return compressed;
-  } catch (error) {
-    console.warn(
-      "[Image] Could not compress on the fly, sending the original image",
-      error
-    );
-    return { dataUrl: image.dataUrl, mimeType: image.type };
-  }
 }
 
 async function analysisImageParts(image: ImageAsset): Promise<unknown[]> {

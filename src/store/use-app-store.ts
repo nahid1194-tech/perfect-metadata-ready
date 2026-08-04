@@ -71,6 +71,8 @@ type AppState = {
   clearSelected: () => void;
   setGenerating: (generating: boolean) => void;
   setProgress: (progress: number) => void;
+  activeImageId: string | null;
+  setActiveImageId: (activeImageId: string | null) => void;
   patchQueueItem: (id: string, patch: Partial<QueueItem>) => void;
   enqueue: (ids: string[]) => void;
   removeQueueItem: (id: string) => void;
@@ -129,6 +131,7 @@ export const useAppStore = create<AppState>()(
       results: [],
       generating: false,
       progress: 0,
+      activeImageId: null,
       queueItems: {},
       queueState: "idle",
       batchTotal: 0,
@@ -229,6 +232,7 @@ export const useAppStore = create<AppState>()(
       setQueueState: (queueState) => set({ queueState }),
       setBatchTotal: (batchTotal) => set({ batchTotal }),
       setBatchCompleted: (batchCompleted) => set({ batchCompleted }),
+      setActiveImageId: (activeImageId) => set({ activeImageId }),
       setEta: (etaSeconds) => set({ etaSeconds }),
       openSuccess: () => set({ successOpen: true }),
       closeSuccess: () => set({ successOpen: false }),

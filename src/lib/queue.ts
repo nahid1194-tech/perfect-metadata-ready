@@ -19,6 +19,7 @@ import {
   isNetworkError,
   isRateLimited,
   NoActiveKeyError,
+  prepareImage,
   providerSwitchReason,
   RateLimitedError,
   rateLimitDelayMs,
@@ -656,6 +657,7 @@ export async function runQueue(
   };
 
   const runSequential = async (items: ImageAsset[]): Promise<void> => {
+    let prefetch: Promise<void> | null = null;
     for (let i = 0; i < items.length; i++) {
       if (stopRequested) return;
       while (pauseRequested) {
@@ -665,7 +667,23 @@ export async function runQueue(
       }
       if (stopRequested) return;
       store.setQueueState("running");
+
+      if (prefetch) {
+        const pending = prefetch;
+        prefetch = null;
+        await pending;
+      } else if (hasApiKeys) {
+        await prepareImage(items[i]);
+      }
+
+      store.setActiveImageId(items[i].id);
+
+      if (hasApiKeys && i + 1 < items.length) {
+        prefetch = prepareImage(items[i + 1]);
+      }
+
       await processTracked(items[i]);
+
       if (hasApiKeys && i < items.length - 1) {
         await sleepBetweenImages();
       }
@@ -688,6 +706,7 @@ export async function runQueue(
 
   store.setQueueState("idle");
   store.setGenerating(false);
+  store.setActiveImageId(null);
   store.setEta(null);
   updateDebug(
     null,
@@ -795,6 +814,7 @@ export async function retryImage(imageId: string): Promise<void> {
   store.setBatchCompleted(0);
 
   try {
+    store.setActiveImageId(imageId);
     const ok = await processOne(image, true);
     if (!ok) {
       const item = useAppStore.getState().queueItems[imageId];
@@ -806,6 +826,7 @@ export async function retryImage(imageId: string): Promise<void> {
     pauseRequested = false;
     activeControllers.clear();
     useAppStore.getState().setGenerating(false);
+    useAppStore.getState().setActiveImageId(null);
     useAppStore.getState().setQueueState("idle");
     useAppStore.getState().setEta(null);
     updateDebug(

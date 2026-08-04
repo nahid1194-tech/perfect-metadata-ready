@@ -1,10 +1,50 @@
+import type { ImageAsset } from "@/lib/types";
+import { useAppStore } from "@/store/use-app-store";
+
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
-export const IMAGE_API_MAX_DIMENSION = 1280;
+export const IMAGE_API_MAX_DIMENSION = 1600;
 
 const DEFAULT_MAX_DIMENSION = 4096;
 const MIN_QUALITY = 0.3;
 const MIN_DIMENSION = 1024;
+
+const preparedCache = new Map<string, { dataUrl: string; mimeType: string }>();
+
+export async function prepareImageForApi(
+  image: ImageAsset
+): Promise<{ dataUrl: string; mimeType: string }> {
+  const cached = preparedCache.get(image.id);
+  if (cached) return cached;
+  if (image.apiDataUrl && image.apiMimeType) {
+    const entry = { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
+    preparedCache.set(image.id, entry);
+    return entry;
+  }
+  try {
+    const compressed = await compressImageDataUrl(
+      image.dataUrl,
+      IMAGE_MAX_BYTES,
+      IMAGE_API_MAX_DIMENSION
+    );
+    preparedCache.set(image.id, compressed);
+    useAppStore.getState().updateImage(image.id, {
+      apiDataUrl: compressed.dataUrl,
+      apiMimeType: compressed.mimeType,
+    });
+    return compressed;
+  } catch (error) {
+    console.warn(
+      "[Image] Could not compress for the API, sending the original image",
+      error
+    );
+    return { dataUrl: image.dataUrl, mimeType: image.type };
+  }
+}
+
+export function clearPreparedCache(): void {
+  preparedCache.clear();
+}
 
 export class ImageTooLargeError extends Error {
   constructor(

@@ -1,9 +1,11 @@
 "use client"
 
+import { useEffect, useRef, useState } from "react"
 import { Download, Pause, Play, RotateCcw, Square, Trash2, WandSparkles } from "lucide-react"
 
 import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
+import type { ApiProvider } from "@/lib/types"
 import { validateMetadata, validateResults } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -11,14 +13,40 @@ import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 
+const PROVIDER_LABEL: Record<ApiProvider, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI",
+  mistral: "Mistral AI",
+};
+
 export function UploadToolbar() {
   const images = useAppStore((state) => state.images);
   const selectedIds = useAppStore((state) => state.selectedIds);
   const results = useAppStore((state) => state.results);
   const failedImageIds = useAppStore((state) => state.failedImageIds);
   const platform = useAppStore((state) => state.settings.platform);
+  const activeImageId = useAppStore((state) => state.activeImageId);
+  const debugStatus = useAppStore((state) => state.debugStatus);
   const { run, pause, resume, stop, generating, queueState, progress, completed, total, etaSeconds } =
     useGenerate();
+
+  const [liveRate, setLiveRate] = useState<number | null>(null);
+  const startedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (generating) {
+      if (startedAtRef.current === null) startedAtRef.current = Date.now();
+      if (completed > 0) {
+        const elapsedMinutes = (Date.now() - startedAtRef.current) / 60000;
+        if (elapsedMinutes >= 1 / 12) {
+          setLiveRate(completed / elapsedMinutes);
+        }
+      }
+    } else {
+      startedAtRef.current = null;
+      setLiveRate(null);
+    }
+  }, [generating, completed]);
 
   const partialSelection =
     selectedIds.length > 0 && selectedIds.length < images.length;
@@ -26,11 +54,17 @@ export function UploadToolbar() {
     ? `Generate Selected (${selectedIds.length})`
     : `Generate All (${images.length})`;
 
+  const activeImage = images.find((image) => image.id === activeImageId);
+  const remaining = Math.max(0, total - completed);
+
   let statusText: string;
   if (generating && total > 0) {
+    const current = activeImage ? `“${activeImage.name}”` : "…";
+    const eta = etaSeconds !== null ? ` · ~${etaSeconds}s left` : "";
+    const rate = liveRate !== null ? ` · ~${Math.round(liveRate)}/min` : "";
     statusText = queueState === "paused"
       ? `Paused · ${completed} of ${total}`
-      : `Generating ${completed} of ${total}${etaSeconds !== null ? ` · ~${etaSeconds}s left` : ""}`;
+      : `Generating ${current} · ${completed}/${total}${remaining > 0 ? ` · ${remaining} left` : ""}${eta}${rate}`;
   } else if (generating) {
     statusText = "Generating…";
   } else if (results.length > 0) {
@@ -38,6 +72,15 @@ export function UploadToolbar() {
   } else {
     statusText = `Ready · ${images.length} files`;
   }
+
+  const activeProvider = generating ? debugStatus.activeProvider : null;
+  const apiLine =
+    activeProvider && debugStatus.activeModel
+      ? `${PROVIDER_LABEL[activeProvider]} · ${debugStatus.activeModel}` +
+        (debugStatus.activeKeyCount
+          ? ` · Key ${(debugStatus.activeKeyIndex ?? 0) + 1}/${debugStatus.activeKeyCount}`
+          : "")
+      : null;
 
   const handleGenerate = () => {
     if (images.length === 0) {
@@ -126,9 +169,16 @@ export function UploadToolbar() {
   return (
     <div className="sticky top-4 z-50 flex flex-col gap-3 rounded-[20px] border bg-card p-4 shadow-sm">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <p className="min-w-0 truncate text-sm text-muted-foreground">
-          {statusText}
-        </p>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="min-w-0 truncate text-sm text-muted-foreground">
+            {statusText}
+          </p>
+          {apiLine ? (
+            <p className="min-w-0 truncate font-mono text-xs text-muted-foreground/80">
+              API: {apiLine}
+            </p>
+          ) : null}
+        </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {generating ? (
             <>

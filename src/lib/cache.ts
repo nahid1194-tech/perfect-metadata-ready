@@ -42,12 +42,24 @@ async function sha256Hex(data: Uint8Array<ArrayBuffer>): Promise<string> {
     .join("");
 }
 
+const contentHashCache = new Map<string, Promise<string>>();
+
+export async function imageContentHash(image: ImageAsset): Promise<string> {
+  const cached = contentHashCache.get(image.id);
+  if (cached) return cached;
+  const source = image.apiDataUrl ?? image.dataUrl;
+  const promise = (async () => {
+    const base64 = source.split(",")[1] ?? source;
+    return sha256Hex(base64ToBytes(base64));
+  })();
+  contentHashCache.set(image.id, promise);
+  return promise;
+}
+
 export async function resultCacheKey(
   image: ImageAsset,
   settings: GenerationSettings
 ): Promise<string> {
-  const source = image.apiDataUrl ?? image.dataUrl;
-  const base64 = source.split(",")[1] ?? source;
-  const content = await sha256Hex(base64ToBytes(base64));
+  const content = await imageContentHash(image);
   return `${content}:${settingsSignature(settings)}`;
 }

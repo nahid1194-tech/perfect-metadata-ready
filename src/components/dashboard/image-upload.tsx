@@ -5,13 +5,11 @@ import { AnimatePresence, motion } from "framer-motion"
 import { FileImage, ImagePlus, Loader2, X } from "lucide-react"
 
 import {
-  IMAGE_API_MAX_DIMENSION,
-  IMAGE_MAX_BYTES,
-  ImageTooLargeError,
-  compressImageDataUrl,
-} from "@/lib/image-process"
-import { isVectorFile, renderVectorToPng } from "@/lib/eps-render"
-import type { ImageAsset } from "@/lib/types"
+  formatBytes,
+  isPreviewableType,
+  isSupportedFile,
+  processUploadFiles,
+} from "@/lib/upload-process"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { useAppStore } from "@/store/use-app-store"
@@ -24,46 +22,6 @@ type UploadItem = {
   phase: "reading" | "compressing" | "converting";
   progress: number;
 };
-
-function isSupported(file: File): boolean {
-  if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
-    return true;
-  }
-  return /\.(svg|eps|ps)$/i.test(file.name);
-}
-
-function isCompressible(file: File): boolean {
-  if (!file.type.startsWith("image/")) return false;
-  return !/\.(svg|eps|ps)$/i.test(file.name);
-}
-
-function isPreviewable(type: string): boolean {
-  return type.startsWith("image/") || type.startsWith("video/");
-}
-
-function formatBytes(bytes: number) {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(1)} ${units[index]}`;
-}
-
-function readFile(
-  file: File,
-  onProgress: (progress: number) => void
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    };
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Could not read the file."));
-    reader.readAsDataURL(file);
-  });
-}
 
 export function ImageUpload() {
   const images = useAppStore((state) => state.images);
@@ -89,7 +47,7 @@ export function ImageUpload() {
       }
       const accepted: File[] = [];
       for (const file of list) {
-        if (!isSupported(file)) {
+        if (!isSupportedFile(file)) {
           toast(
             "error",
             "Unsupported file",
@@ -110,89 +68,28 @@ export function ImageUpload() {
           )
         );
 
-      const added: ImageAsset[] = [];
-      let succeeded = 0;
-      let failed = 0;
-
-      for (const file of accepted) {
-        try {
-          const dataUrl = await readFile(file, (progress) =>
-            patchItem(file, { phase: "reading", progress })
-          );
-
-          let apiDataUrl: string | undefined;
-          let apiMimeType: string | undefined;
-          let type = file.type || file.name.replace(/.*\./, "");
-          if (isVectorFile(file)) {
-            if (file.size > IMAGE_MAX_BYTES) {
-              throw new ImageTooLargeError(
-                `${file.name} is larger than 20 MB — use a vector file of 20 MB or less.`
-              );
-            }
-            patchItem(file, { phase: "converting", progress: 0 });
-            const rendered = await renderVectorToPng(file);
-            patchItem(file, { phase: "converting", progress: 100 });
-            const compressed = await compressImageDataUrl(
-              rendered.dataUrl,
-              IMAGE_MAX_BYTES,
-              IMAGE_API_MAX_DIMENSION
-            );
-            apiDataUrl = compressed.dataUrl;
-            apiMimeType = compressed.mimeType;
-            type = compressed.mimeType;
-          } else if (isCompressible(file)) {
-            patchItem(file, { phase: "compressing", progress: 0 });
-            const compressed = await compressImageDataUrl(
-              dataUrl,
-              IMAGE_MAX_BYTES,
-              IMAGE_API_MAX_DIMENSION
-            );
-            apiDataUrl = compressed.dataUrl;
-            apiMimeType = compressed.mimeType;
-            patchItem(file, { phase: "compressing", progress: 100 });
-          } else if (file.size > IMAGE_MAX_BYTES) {
-            throw new ImageTooLargeError(
-              `${file.name} is larger than 20 MB. Videos and vector files cannot be compressed for the API — use a file of 20 MB or less.`
-            );
-          }
-
-          added.push({
-            id: crypto.randomUUID(),
-            name: file.name,
-            size: file.size,
-            type,
-            dataUrl,
-            apiDataUrl,
-            apiMimeType,
-          });
-          succeeded++;
-        } catch (error) {
-          failed++;
-          toast(
-            "error",
-            error instanceof ImageTooLargeError ? "Image too large" : "Could not process file",
-            error instanceof ImageTooLargeError
-              ? error.message
-              : `${file.name} could not be processed. ${
-                  error instanceof Error ? error.message : ""
-                }`
-          );
-        }
-      }
+      const { assets, failures } = await processUploadFiles(accepted, patchItem);
 
       setQueue([]);
-      if (added.length > 0) addImages(added);
-      if (failed === 0) {
+      for (const failure of failures) {
+        toast(
+          "error",
+          failure.tooLarge ? "Image too large" : "Could not process file",
+          failure.message
+        );
+      }
+      if (assets.length > 0) addImages(assets);
+      if (failures.length === 0) {
         toast(
           "success",
           "Upload complete",
-          `${succeeded} file${succeeded === 1 ? "" : "s"} added.`
+          `${assets.length} file${assets.length === 1 ? "" : "s"} added.`
         );
-      } else if (succeeded > 0) {
+      } else if (assets.length > 0) {
         toast(
           "info",
           "Upload complete",
-          `${succeeded} added, ${failed} failed.`
+          `${assets.length} added, ${failures.length} failed.`
         );
       } else {
         toast("error", "Upload failed", "No files could be added.");
@@ -332,7 +229,7 @@ export function ImageUpload() {
                     transition={{ type: "spring", stiffness: 300, damping: 24 }}
                     className="group relative"
                   >
-                    {isPreviewable(image.type) ? (
+                    {isPreviewableType(image.type) ? (
                       image.type.startsWith("video/") ? (
                         <video
                           src={previewSrc}

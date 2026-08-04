@@ -7,6 +7,7 @@ import { Menu, X } from "lucide-react"
 import { ensureModelCache } from "@/lib/models"
 import { ControlCard } from "@/components/dashboard/control-card"
 import { GenerationSpeedSettings } from "@/components/dashboard/generation-speed-settings"
+import { GithubUpload } from "@/components/dashboard/github-upload"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
 import { NotificationCard } from "@/components/dashboard/notification-card"
@@ -121,10 +122,14 @@ export function DashboardShell() {
 
           <Card className="rounded-[20px] shadow-sm">
             <CardHeader className="border-b pb-3">
-              <CardTitle>Upload Images</CardTitle>
+              <CardTitle>Upload &amp; Import Images</CardTitle>
             </CardHeader>
             <CardContent className="pt-4">
-              <ImageUpload />
+              <div className="flex flex-col gap-6">
+                <ImageUpload />
+                <div className="h-px bg-border" />
+                <GithubUpload />
+              </div>
             </CardContent>
           </Card>
 

@@ -839,9 +839,9 @@ const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
   (c) => c.label
 ).join(", ");
 
-const VISUAL_ANALYSIS_PROMPT = `You are a meticulous visual analyst for professional stock photography and vector/design assets. Examine the image region by region and zoom into fine details. Describe ONLY what is clearly visible. Never guess, assume, or invent content - if something is not clearly visible, leave the field empty ("" or []).
+const VISUAL_ANALYSIS_PROMPT = `You are a meticulous visual analyst for professional stock photography and vector/design assets. Examine the entire image systematically, region by region (top-left to bottom-right, then foreground to background), and zoom into fine details. Analyze the whole frame, never just the main subject. Describe ONLY what is clearly visible. Never guess, assume, or invent content - if something is not clearly visible, leave the field empty ("" or []).
 
-Cover every category that applies: primary subject, secondary subjects, small objects, human count, gender, age group, facial expressions, pose, clothing, accessories, animals, plants, food, vehicles, buildings, furniture, technology devices, nature elements, sky, water, foreground, background, colors, materials, texture, lighting, shadows, reflection, camera angle, composition, copy space, depth of field, focus, graphic elements, shapes, pattern, style, mood, emotion, commercial concepts, OCR text, logos, brands, landmarks, and background detection (transparent / white / black / studio / isolated).
+Cover every category that applies: primary subject, secondary subjects, all visible objects, human count, gender (only when clearly visible), ethnicity (only when visually obvious and appropriate), age group, facial expressions, pose, activities, gestures, clothing, accessories, professions (only when visually supported), animals, plants, food, vehicles, buildings, furniture, technology devices, nature elements, sky, water, foreground, background, background type (transparent / white / black / colored / studio / isolated / natural), colors, materials, textures, lighting style, shadows, reflections, camera angle, composition, perspective, focal point, depth of field, copy space, emotions, environment, location type (indoor / outdoor / studio / office / home / nature / urban / transport / restaurant / healthcare / education / industrial), weather, season, time of day, media type (photograph / illustration / vector / EPS / icon / graphic / 3D render / AI-generated), commercial concepts, OCR text, logos, brands, trademarks, copyrighted content, landmarks, abstract concepts, and background detection.
 
 Do NOT generate any metadata in this stage - only return the structured analysis object.
 
@@ -853,11 +853,15 @@ Return ONLY this structured analysis object (JSON, no markdown, no commentary):
   "smallObjects": [],
   "humanCount": 0,
   "gender": [],
+  "ethnicity": [],
   "ageGroup": [],
   "facialExpressions": [],
   "pose": [],
+  "activities": [],
+  "gestures": [],
   "clothing": [],
   "accessories": [],
+  "professions": [],
   "animals": [],
   "plants": [],
   "food": [],
@@ -886,9 +890,12 @@ Return ONLY this structured analysis object (JSON, no markdown, no commentary):
   "focus": "",
   "perspective": "",
   "environment": "",
+  "locationType": "",
   "season": "",
   "weather": "",
+  "timeOfDay": "",
   "style": "",
+  "mediaType": "",
   "mood": "",
   "emotion": "",
   "commercialConcepts": [],
@@ -899,6 +906,7 @@ Return ONLY this structured analysis object (JSON, no markdown, no commentary):
   "text": [],
   "logos": [],
   "brands": [],
+  "copyrightedContent": [],
   "landmarks": [],
   "concepts": [],
   "designStyle": "",
@@ -907,6 +915,7 @@ Return ONLY this structured analysis object (JSON, no markdown, no commentary):
   "transparent": false,
   "whiteBackground": false,
   "blackBackground": false,
+  "coloredBackground": false,
   "studioBackground": false,
   "isolated": false
 }
@@ -918,11 +927,15 @@ Field guidance:
 - "smallObjects": small but clearly visible details (e.g. "a door handle", "a leaf on the ground").
 - "humanCount": the exact number of clearly visible people; 0 if none.
 - "gender": visible gender(s), e.g. ["male", "female"] - only if clearly visible.
+- "ethnicity": ONLY if visually obvious AND appropriate to state (e.g. depicted via explicit cultural attributes such as traditional clothing or an unmistakable depiction); otherwise leave []. Never guess, stereotype, or infer ethnicity from assumptions - when in doubt, leave empty.
 - "ageGroup": visible age group(s), e.g. ["child", "adult"], ["teenager"], ["senior"] - only if clearly visible.
 - "facialExpressions": visible expressions (e.g. "smiling", "neutral") - only if a face is clearly visible.
 - "pose": visible body poses (e.g. "standing", "sitting", "running", "jumping").
+- "activities": clearly visible actions (e.g. "cycling", "cooking", "reading", "typing", "painting").
+- "gestures": clearly visible hand or body gestures (e.g. "pointing", "waving", "thumbs up", "handshake").
 - "clothing": visible clothing on people (e.g. "white linen shirt, blue jeans").
 - "accessories": visible accessories (e.g. "eyeglasses", "hat", "backpack", "watch", "jewelry").
+- "professions": profession ONLY if clearly indicated by visible cues (e.g. "chef" from apron and toque, "doctor" from scrubs and stethoscope, "carpenter" from tools, "athlete" from sports gear); otherwise [].
 - "animals": clearly visible animals.
 - "plants": clearly visible plants (trees, flowers, grass).
 - "food": clearly visible food or drinks.
@@ -951,9 +964,12 @@ Field guidance:
 - "focus": where the image is sharpest (e.g. "sharp focus on the subject's eyes").
 - "perspective": e.g. "one-point perspective", "flat", "isometric", "top-down".
 - "environment": the setting (e.g. "modern kitchen", "coastal cliff", "abstract digital canvas").
+- "locationType": ONLY one of: indoor, outdoor, studio, office, home, nature, urban, transport, restaurant, healthcare, education, industrial, other.
 - "season": only if clearly depicted (e.g. "winter", "autumn"); otherwise "".
 - "weather": only if clearly depicted (e.g. "sunny", "rainy", "foggy"); otherwise "".
+- "timeOfDay": only if clearly depicted (e.g. "day", "night", "dawn", "dusk", "golden hour"); otherwise "".
 - "style": e.g. "photographic", "illustration", "3D render", "flat vector", "line art", "abstract", "watercolor".
+- "mediaType": ONLY one of: photograph, illustration, vector, eps, icon, graphic, "3D render", "ai-generated". Distinguish real photographs from illustrations, vector/eps artwork, icons, graphics, and AI-generated images by visible cues (rendering artifacts, flat colors, paths, symmetry).
 - "mood": the overall mood conveyed by visible cues (e.g. "calm", "energetic", "serene", "dramatic").
 - "emotion": emotions shown by visible people, if any.
 - "commercialConcepts": commercial usage concepts ONLY if visually supported (e.g. a clean workspace: "corporate", "office"; fresh food: "catering", "restaurant").
@@ -964,6 +980,7 @@ Field guidance:
 - "text": transcribe every legible visible text exactly (e.g. "COFFEE"); for partial labels transcribe the legible part.
 - "logos": note any visible logos and what they appear on (do not assume the brand name unless clearly legible).
 - "brands": visible brand names only if clearly legible; trademarks are excluded from metadata.
+- "copyrightedContent": any clearly visible copyrighted or trademarked elements that must NEVER be used in metadata (e.g. "branded sneaker logo", "poster artwork", "book cover", "character figurine"); otherwise [].
 - "landmarks": recognizable landmarks or notable architecture only if clearly identifiable.
 - "concepts": only concepts unambiguously supported by visible content (e.g. for a beach photo: "coastline", "summer"; never "success" or "business" unless literally depicted).
 - "designStyle": if it is a designed asset, name the design style (minimal, flat, corporate, geometric, hand-drawn, gradient, etc.); otherwise "".
@@ -972,6 +989,7 @@ Field guidance:
 - "transparent": true only if the background is truly transparent.
 - "whiteBackground": true only if the background is plain white.
 - "blackBackground": true only if the background is plain black.
+- "coloredBackground": true only if the background is a plain solid color that is not white or black.
 - "studioBackground": true only if the background is a professional studio backdrop (seamless, often gray or colored).
 - "isolated": true only if the subject is cut out / isolated against a plain background.
 
@@ -987,30 +1005,40 @@ Reply with ONLY this JSON object (no markdown, no commentary):
 TRUTHFULNESS (highest priority):
 - Every title, keyword, description term, and concept must trace back to the analysis and the ground-truth facts.
 - Never add objects that are not visible. Never guess, hallucinate, or describe invisible concepts.
+- Never invent subjects, actions, or attributes. If the analysis does not mention it, do not use it.
 - No misleading metadata, no copyright or trademark violations, no real people, brands, artist names, or personal data. English only.
+- Never promise search rankings or sales performance.
 
-KEYWORDS:
-- Only highly relevant, specific, searchable terms, ranked by importance (most important first).
+KEYWORDS (quality over quantity):
+- Generate only highly relevant, specific, searchable terms, ordered by buyer search intent (most searchable and important first).
 - The first 10 keywords must represent the main subject.
-- Prefer singular forms where natural (e.g. "cat" not "cats").
-- No duplicates. Remove weak, generic, or vague keywords (e.g. background, illustration, design, art, beautiful, nice, photo, image, concept, high quality, etc.) unless strictly required by visible content.
-- Add commercial search terms ONLY if visually supported (use the analysis "commercialConcepts" list); never invent them.
-- Never use brand names, logos, trademarks, or artist names as keywords even if a logo is clearly visible.
-- Never use these unless the analysis clearly supports them: business, technology, innovation, success, marketing, corporate, digital, solution, strategy, startup, leadership, finance.
+- Build keywords from the analysis across: main subject, secondary subjects, actions/activities, concepts, industry, emotions, environment, composition, style, color, and media type.
+- Include business/technology/healthcare/education concepts ONLY when the analysis "commercialConcepts" or "industryRelevance" lists them.
+- Include seasonal keywords ONLY if the analysis "season" is set. Include copy-space keywords (e.g. "copy space") ONLY if the analysis "copySpace" is true. Include "transparent background" ONLY if "transparent" is true, and "white background" ONLY if "whiteBackground" is true.
+- Prefer singular forms where natural (e.g. "cat" not "cats"). No duplicates. Remove weak, generic, or vague keywords (background, illustration, design, art, beautiful, nice, photo, image, concept, high quality, etc.) unless strictly required by visible content.
+- Never use brand names, logos, trademarks, artist names, or any item listed in the analysis "copyrightedContent" as keywords, even if clearly visible.
 - For abstract/vector/designed assets, describe the actual visible design (colours, shapes, lines, gradients, layout) and use the analysis "artworkType" term when naming it, e.g. abstract background, geometric pattern, fluid shape, brush texture, wave line, gradient mesh, modern banner, minimal poster, brochure cover, presentation background, template, wallpaper, vector illustration.
 
 TITLES:
-- Natural, readable English. Describe the exact visible subject and the most important visible details.
-- Follow Adobe Stock and Shutterstock title guidelines. No keyword stuffing, no misleading information.
+- Write titles that exactly describe the visible image: the main subject plus the most important secondary details, setting, and mood.
+- Natural, readable English. Follow Adobe Stock and Shutterstock title guidelines. No keyword stuffing, no generic filler, no misleading information.
+- Avoid generic titles such as "Business meeting" or "Nature scene" - be specific about what is actually shown.
 
 DESCRIPTION (Shutterstock only):
-- Accurate and natural. Summarize the visible image. No marketing language, no unnecessary adjectives, no links, camera info, or trademarks.
+- Write a concise, commercial, natural description: one or two factual sentences covering the main subject, the setting (use "environment" and "locationType"), the action (use "activities"), and the mood or style.
+- No marketing language, no unnecessary adjectives, no links, camera info, or trademarks, and nothing not present in the analysis.
 
 PLATFORM RULES:
 - Adobe: title 60-70 characters, no commas; keywords <=49 unique; category = ONE ID from: ${ADOBE_CATEGORY_GUIDE}
 - Shutterstock: title <=2048 chars; description <=2048 chars; keywords 7-50 unique; category = 1-2 official category NAMES comma-separated, using the exact names from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
 
-BEFORE returning, self-validate: does every keyword exist visually in the analysis? does the title accurately describe the visible content? does the description summarize only visible content? Remove every weak, generic, or misleading keyword. Precision over quantity.
+CATEGORY:
+- Choose the single most accurate category for the depicted subject. For Adobe, pick the ID whose label best matches the subject. For Shutterstock, pick 1 (optionally 2) official category names that best match the subject, using the analysis subject, objects, environment, locationType, and mediaType.
+
+SENSITIVE ATTRIBUTES:
+- Use gender, ethnicity, age group, profession, or any demographic term ONLY if the analysis explicitly reports them. Never guess or infer them.
+
+BEFORE returning, self-validate: does every keyword exist in the analysis? does the title exactly describe the visible content? does the description only summarize visible content? is the category the most accurate one? Remove every weak, generic, or misleading keyword. Precision over quantity. If confidence is low, revise internally before returning.
 
 Return ONLY the JSON object.`;
 
@@ -1044,7 +1072,7 @@ function isValidAnalysis(text: string): boolean {
 }
 
 const VALIDATION_MIN_SCORE = 95;
-const VALIDATION_MAX_ATTEMPTS = 3;
+const VALIDATION_MAX_ATTEMPTS = 4;
 
 function buildValidationPrompt(
   analysisJson: string,
@@ -1063,15 +1091,16 @@ GENERATED METADATA:
 ${JSON.stringify(metadata)}
 
 CHECKLIST (score 0-100, be strict):
-1. Every keyword is relevant and present in the analysis - no hallucinated or invisible concepts.
-2. Keywords are SEO-friendly, ranked by importance, first 10 = main subject, singular forms preferred, no duplicates, no weak/generic terms.
-3. Commercial search terms appear only if visually supported (from the analysis "commercialConcepts"); no invented concepts.
-4. The title accurately describes the visible subject without keyword stuffing or misleading info.
-5. The Shutterstock description is accurate, natural, and free of marketing language.
-6. Adobe/Shutterstock guidelines are followed (title lengths, keyword limits, valid category IDs).
-7. No copyright, trademark, brand, or real-person violations (logos may be visible but never become keywords).
-8. The background description and flags (transparent vs white vs black vs solid vs real scene) match the ground-truth facts and the analysis.
-9. Metadata is commercially useful and professional.
+1. Every keyword is present in the analysis - no hallucinated, invisible, or invented concepts.
+2. Keywords are ordered by buyer search intent (most searchable first); the first 10 represent the main subject; singular forms preferred; no duplicates; no weak/generic terms.
+3. The title exactly describes the visible subject (main subject plus key secondary details and setting), is specific, natural English, and free of keyword stuffing and generic filler.
+4. The Shutterstock description is accurate, natural, commercial, concise, and contains nothing absent from the analysis.
+5. The category is the MOST accurate for the subject - the Adobe ID and the Shutterstock name(s) truly match the depicted subject, not merely a valid value.
+6. Adobe/Shutterstock guidelines are followed (title lengths, keyword limits, no commas in Adobe titles, correct category formats).
+7. No copyright, trademark, brand, or real-person violations; nothing from the analysis "copyrightedContent" is used in metadata; sensitive attributes (gender, ethnicity, age group, profession) appear only if the analysis explicitly reports them.
+8. The background description and flags (transparent vs white vs black vs colored vs studio vs isolated vs real scene) match the ground-truth facts and the analysis.
+9. mediaType, locationType, environment, timeOfDay, season, and weather in the metadata are consistent with the analysis.
+10. Metadata is commercially useful, professional, and makes no misleading claims or search-ranking promises.
 
 Reply with ONLY this JSON object (no markdown, no commentary):
 {"score": 0-100, "issues": ["..."]}
@@ -1178,7 +1207,7 @@ ${backgroundHint}`
   for (let attempt = 0; attempt < VALIDATION_MAX_ATTEMPTS; attempt++) {
     const metaRaw = await callText(
       buildMetadataPrompt(analysisJson, settingsPrompt, bgRules, feedback),
-      0.7
+      0.5
     );
     const candidate = parseMetadata(metaRaw);
     if (!candidate) {

@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { motion } from "framer-motion"
 import {
   AlertTriangle,
@@ -55,7 +56,7 @@ function isPreviewable(type: string): boolean {
   return type.startsWith("image/") || type.startsWith("video/");
 }
 
-export function PendingImageCard({
+export const PendingImageCard = memo(function PendingImageCard({
   image,
   item,
   active = false,
@@ -235,4 +236,4 @@ export function PendingImageCard({
       </div>
     </motion.article>
   );
-}
+});

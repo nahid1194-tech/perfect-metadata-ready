@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import { motion } from "framer-motion"
 import { FileImage, Loader2, RefreshCw, Trash2 } from "lucide-react"
 
@@ -29,7 +29,7 @@ import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 
-export function ImageCard({ result }: { result: GenerationResult }) {
+export const ImageCard = memo(function ImageCard({ result }: { result: GenerationResult }) {
   const platform = useAppStore((state) => state.settings.platform);
   const images = useAppStore((state) => state.images);
   const updateResult = useAppStore((state) => state.updateResult);
@@ -223,4 +223,4 @@ export function ImageCard({ result }: { result: GenerationResult }) {
       </div>
     </motion.article>
   );
-}
+});

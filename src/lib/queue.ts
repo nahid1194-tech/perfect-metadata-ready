@@ -26,6 +26,7 @@ import {
   testGeminiConnection,
   testMistralConnection,
   testOpenAIConnection,
+  warmUpProvider,
 } from "@/lib/generate";
 import {
   ensureModelCache,
@@ -470,6 +471,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
 
   const controller = new AbortController();
   activeControllers.set(image.id, controller);
+  const startedAtMs = performance.now();
 
   updateDebug(
     null,
@@ -492,7 +494,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
     const cap = item.status === "generating" ? 95 : 60;
     const next = Math.min(item.progress + Math.random() * 4, cap);
     useAppStore.getState().patchQueueItem(image.id, { progress: next });
-  }, 140);
+  }, 220);
 
   let result: GenerationResult;
   try {
@@ -567,6 +569,10 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
     current.addResult(result);
   }
 
+  console.log(
+    `[Perf] ${image.name}:total=${(performance.now() - startedAtMs).toFixed(0)}ms`
+  );
+
   useAppStore.getState().patchQueueItem(image.id, {
     status: "completed",
     progress: 100,
@@ -609,6 +615,7 @@ export async function runQueue(
 
   if (hasApiKeys) {
     void ensureModelCache();
+    warmUpProvider(store.primaryProvider);
   }
 
   active = true;
@@ -794,6 +801,7 @@ export async function retryImage(imageId: string): Promise<void> {
 
   if (activeKeys(store.apiKeys).length > 0) {
     void ensureModelCache();
+    warmUpProvider(useAppStore.getState().primaryProvider);
   }
 
   active = true;

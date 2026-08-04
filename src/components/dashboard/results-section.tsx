@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { AnimatePresence } from "framer-motion"
 import { Sparkles } from "lucide-react"
 
@@ -13,6 +13,36 @@ export function ResultsSection() {
   const images = useAppStore((state) => state.images);
   const results = useAppStore((state) => state.results);
   const queueItems = useAppStore((state) => state.queueItems);
+  const activeImageId = useAppStore((state) => state.activeImageId);
+  const autoScroll = useAppStore((state) => state.autoScroll);
+  const prevActiveRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (activeImageId && activeImageId !== prevActiveRef.current) {
+      prevActiveRef.current = activeImageId;
+      if (autoScroll) {
+        requestAnimationFrame(() => {
+          document
+            .getElementById(`card-${activeImageId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+    }
+    if (!activeImageId) prevActiveRef.current = null;
+  }, [activeImageId, autoScroll]);
+
+  useEffect(() => {
+    if (!activeImageId || !autoScroll) return;
+    const id = setInterval(() => {
+      const el = document.getElementById(`card-${activeImageId}`);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 56 || rect.bottom > window.innerHeight - 96) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 1600);
+    return () => clearInterval(id);
+  }, [activeImageId, autoScroll]);
 
   const cards = useMemo(() => {
     const resultByImage = new Map<string, GenerationResult>();
@@ -63,7 +93,12 @@ export function ResultsSection() {
           card.kind === "result" ? (
             <ImageCard key={card.result.id} result={card.result} />
           ) : (
-            <PendingImageCard key={card.image.id} image={card.image} item={card.item} />
+            <PendingImageCard
+              key={card.image.id}
+              image={card.image}
+              item={card.item}
+              active={card.image.id === activeImageId}
+            />
           )
         )}
       </AnimatePresence>

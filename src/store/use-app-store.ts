@@ -73,6 +73,8 @@ type AppState = {
   setProgress: (progress: number) => void;
   activeImageId: string | null;
   setActiveImageId: (activeImageId: string | null) => void;
+  autoScroll: boolean;
+  setAutoScroll: (autoScroll: boolean) => void;
   patchQueueItem: (id: string, patch: Partial<QueueItem>) => void;
   enqueue: (ids: string[]) => void;
   removeQueueItem: (id: string) => void;
@@ -132,6 +134,7 @@ export const useAppStore = create<AppState>()(
       generating: false,
       progress: 0,
       activeImageId: null,
+      autoScroll: true,
       queueItems: {},
       queueState: "idle",
       batchTotal: 0,
@@ -233,6 +236,7 @@ export const useAppStore = create<AppState>()(
       setBatchTotal: (batchTotal) => set({ batchTotal }),
       setBatchCompleted: (batchCompleted) => set({ batchCompleted }),
       setActiveImageId: (activeImageId) => set({ activeImageId }),
+      setAutoScroll: (autoScroll) => set({ autoScroll }),
       setEta: (etaSeconds) => set({ etaSeconds }),
       openSuccess: () => set({ successOpen: true }),
       closeSuccess: () => set({ successOpen: false }),
@@ -248,7 +252,14 @@ export const useAppStore = create<AppState>()(
         })),
       removeResult: (id) =>
         set((state) => ({ results: state.results.filter((r) => r.id !== id) })),
-      clearResults: () => set({ results: [] }),
+      clearResults: () =>
+        set((state) => {
+          const queueItems = { ...state.queueItems };
+          for (const [id, item] of Object.entries(queueItems)) {
+            if (item.status === "completed") delete queueItems[id];
+          }
+          return { results: [], queueItems };
+        }),
       resultCache: {},
       setResultCache: (key, result) =>
         set((state) => {
@@ -286,6 +297,7 @@ export const useAppStore = create<AppState>()(
         providerModelsFetchedAt: state.providerModelsFetchedAt,
         settings: state.settings,
         resultCache: state.resultCache,
+        autoScroll: state.autoScroll,
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as (Partial<AppState> & {

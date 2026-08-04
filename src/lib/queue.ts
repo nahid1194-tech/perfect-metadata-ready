@@ -646,6 +646,7 @@ export async function runQueue(
     } else if (!failed.includes(image.id)) {
       failed.push(image.id);
     }
+    store.setFailedImageIds([...failed]);
     store.setBatchCompleted(Math.min(completed, targets.length));
     store.setProgress(Math.min(100, Math.round((completed / targets.length) * 100)));
     if (completed > 0) {

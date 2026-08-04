@@ -58,9 +58,11 @@ function isPreviewable(type: string): boolean {
 export function PendingImageCard({
   image,
   item,
+  active = false,
 }: {
   image: ImageAsset;
   item: QueueItem;
+  active?: boolean;
 }) {
   const generating = useAppStore((state) => state.generating);
   const removeImage = useAppStore((state) => state.removeImage);
@@ -98,12 +100,17 @@ export function PendingImageCard({
 
   return (
     <motion.article
+      id={`card-${image.id}`}
       layout
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ type: "spring", stiffness: 260, damping: 26 }}
-      className="rounded-[20px] border bg-card p-4 shadow-sm sm:p-5"
+      className={cn(
+        "scroll-mt-24 rounded-[20px] border bg-card p-4 shadow-sm transition-[border-color,box-shadow] duration-300 sm:p-5",
+        active &&
+          "border-primary shadow-[0_8px_40px_-8px] shadow-primary/25 ring-2 ring-primary/30"
+      )}
     >
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3">

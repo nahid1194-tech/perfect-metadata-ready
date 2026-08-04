@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 
-import { normalizeSpeed, superFastConcurrency } from "@/lib/rate-limiter"
+import { normalizeSpeed } from "@/lib/rate-limiter"
 import type { GenerationSpeed } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -14,34 +14,26 @@ const MODES: { id: GenerationSpeed; icon: string; label: string; tag?: string }[
   { id: "normal", icon: "⚖️", label: "Normal", tag: "Default" },
 ];
 
-const PACING: Record<GenerationSpeed, string> = {
+const QUEUE_LABEL: Record<GenerationSpeed, string> = {
   "super-fast": "No delay",
-  fast: "~0.5s delay",
-  normal: "~2.5s delay",
+  fast: "~0.35s delay",
+  normal: "~1.5s delay",
 };
 
-function concurrencyFor(id: GenerationSpeed, activeKeyCount: number): number {
-  if (id === "super-fast") return superFastConcurrency(activeKeyCount);
-  if (id === "fast") return 3;
-  return 1;
-}
-
-function estimateFor(id: GenerationSpeed, activeKeyCount: number): number {
-  if (id === "super-fast") return concurrencyFor(id, activeKeyCount) * 9;
-  if (id === "fast") return 18;
-  return 5;
-}
+const ESTIMATE: Record<GenerationSpeed, number> = {
+  "super-fast": 15,
+  fast: 12,
+  normal: 4,
+};
 
 export function GenerationSpeedSettings() {
   const settings = useAppStore((state) => state.settings);
   const setSettings = useAppStore((state) => state.setSettings);
-  const apiKeys = useAppStore((state) => state.apiKeys);
   const generating = useAppStore((state) => state.generating);
   const batchCompleted = useAppStore((state) => state.batchCompleted);
   const batchTotal = useAppStore((state) => state.batchTotal);
 
   const speed = normalizeSpeed(settings.generationSpeed);
-  const activeKeyCount = apiKeys.filter((entry) => entry.enabled).length;
 
   const [liveRate, setLiveRate] = useState<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
@@ -67,11 +59,14 @@ export function GenerationSpeedSettings() {
     <div className="flex flex-col gap-3">
       <p className="text-sm font-semibold tracking-tight">Generation Speed</p>
 
+      <p className="text-xs text-muted-foreground">
+        Sequential — 1 image at a time in every mode. Speed comes from delay tuning,
+        retries and key rotation.
+      </p>
+
       <div className="flex flex-col gap-2">
         {MODES.map(({ id, icon, label, tag }) => {
           const active = speed === id;
-          const concurrency = concurrencyFor(id, activeKeyCount);
-          const estimate = estimateFor(id, activeKeyCount);
           return (
             <button
               key={id}
@@ -97,13 +92,11 @@ export function GenerationSpeedSettings() {
                 ) : null}
               </span>
               <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                <span>
-                  Concurrency: {concurrency} Worker{concurrency === 1 ? "" : "s"}
-                </span>
+                <span>1 image at a time</span>
                 <span aria-hidden="true">·</span>
-                <span>{PACING[id]}</span>
+                <span>{QUEUE_LABEL[id]}</span>
                 <span aria-hidden="true">·</span>
-                <span>~{estimate} images/min (est.)</span>
+                <span>~{ESTIMATE[id]} images/min (est.)</span>
               </span>
             </button>
           );

@@ -3,38 +3,32 @@ import { useAppStore } from "@/store/use-app-store";
 
 const REQUEST_DELAY_RANGE_MS: Record<GenerationSpeed, [number, number]> = {
   "super-fast": [0, 0],
-  fast: [300, 600],
-  normal: [2000, 3000],
+  fast: [200, 500],
+  normal: [1000, 2000],
 };
 
 const RETRY_DELAY_MS: Record<GenerationSpeed, number> = {
-  "super-fast": 300,
+  "super-fast": 200,
   fast: 500,
-  normal: 2000,
+  normal: 1500,
 };
 
 const KEY_ROTATION_DELAY_MS: Record<GenerationSpeed, number> = {
   "super-fast": 0,
-  fast: 150,
-  normal: 400,
+  fast: 100,
+  normal: 250,
 };
 
 const PROVIDER_SWITCH_DELAY_MS: Record<GenerationSpeed, number> = {
   "super-fast": 0,
-  fast: 250,
-  normal: 500,
+  fast: 100,
+  normal: 250,
 };
 
-const QUEUE_DELAY_MS: Record<GenerationSpeed, number> = {
-  "super-fast": 0,
-  fast: 150,
-  normal: 400,
-};
-
-const CONCURRENCY: Record<GenerationSpeed, number> = {
-  "super-fast": 0,
-  fast: 3,
-  normal: 1,
+const QUEUE_DELAY_RANGE_MS: Record<GenerationSpeed, [number, number]> = {
+  "super-fast": [0, 0],
+  fast: [200, 500],
+  normal: [1000, 2000],
 };
 
 const SPEEDS: GenerationSpeed[] = ["super-fast", "fast", "normal"];
@@ -49,11 +43,6 @@ export function currentSpeed(): GenerationSpeed {
 
 function randomBetween(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
-}
-
-export function superFastConcurrency(activeKeyCount: number): number {
-  const base = Math.max(1, activeKeyCount * 2);
-  return Math.min(8, base);
 }
 
 export function requestDelayMs(): number {
@@ -74,17 +63,8 @@ export function providerSwitchDelayMs(): number {
 }
 
 export function queueDelayMs(): number {
-  return QUEUE_DELAY_MS[currentSpeed()];
-}
-
-export function currentConcurrency(): number {
-  const speed = currentSpeed();
-  if (speed === "super-fast") {
-    const keys = useAppStore.getState().apiKeys;
-    const active = keys.filter((key) => key.enabled).length;
-    return superFastConcurrency(active);
-  }
-  return CONCURRENCY[speed];
+  const [min, max] = QUEUE_DELAY_RANGE_MS[currentSpeed()];
+  return randomBetween(min, max);
 }
 
 function sleepCancellable(ms: number, signal?: AbortSignal): Promise<void> {

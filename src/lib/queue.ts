@@ -32,7 +32,6 @@ import {
   refreshProviderModels,
 } from "@/lib/models";
 import {
-  currentConcurrency,
   currentSpeed,
   keyRotationDelayMs,
   providerSwitchDelayMs,
@@ -656,35 +655,30 @@ export async function runQueue(
     }
   };
 
-  const pool = async (items: ImageAsset[]): Promise<void> => {
-    let nextIndex = 0;
-    const concurrency = Math.max(1, currentConcurrency());
-    const worker = async (): Promise<void> => {
-      for (;;) {
+  const runSequential = async (items: ImageAsset[]): Promise<void> => {
+    for (let i = 0; i < items.length; i++) {
+      if (stopRequested) return;
+      while (pauseRequested) {
         if (stopRequested) return;
-        while (pauseRequested) {
-          if (stopRequested) return;
-          store.setQueueState("paused");
-          await sleep(160);
-        }
-        if (stopRequested) return;
-        store.setQueueState("running");
-        const index = nextIndex++;
-        if (index >= items.length) return;
-        await processTracked(items[index]);
-        if (hasApiKeys) await sleepBetweenImages();
+        store.setQueueState("paused");
+        await sleep(160);
       }
-    };
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+      if (stopRequested) return;
+      store.setQueueState("running");
+      await processTracked(items[i]);
+      if (hasApiKeys && i < items.length - 1) {
+        await sleepBetweenImages();
+      }
+    }
   };
 
-  await pool(targets);
+  await runSequential(targets);
 
   const cancelled = stopRequested;
 
   if (!cancelled && currentSpeed() === "super-fast" && failed.length > 0) {
     const retryTargets = targets.filter((image) => failed.includes(image.id));
-    await pool(retryTargets);
+    await runSequential(retryTargets);
   }
 
   active = false;

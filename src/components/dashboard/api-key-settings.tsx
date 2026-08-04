@@ -35,38 +35,69 @@ import { toast } from "@/store/use-toast-store"
 
 type ConnStatus = "idle" | "testing" | "connected" | "failed";
 
+const PROVIDER_META: Record<
+  ApiProvider,
+  { label: string; title: string; placeholder: string }
+> = {
+  gemini: {
+    label: "Gemini",
+    title: "Gemini API Keys",
+    placeholder: "AIza… (paste Gemini key)",
+  },
+  openai: {
+    label: "OpenAI",
+    title: "OpenAI API Keys",
+    placeholder: "sk-… (paste OpenAI key)",
+  },
+  mistral: {
+    label: "Mistral AI",
+    title: "Mistral AI API Keys",
+    placeholder: "… (paste Mistral key)",
+  },
+};
+
 export function ApiKeySettings() {
+  const primaryProvider = useAppStore((state) => state.primaryProvider);
+  const apiKeys = useAppStore((state) => state.apiKeys);
+
+  const hasFallback = apiKeys.some(
+    (entry) => entry.provider !== primaryProvider && entry.enabled
+  );
+  const meta = PROVIDER_META[primaryProvider];
+
   return (
     <div className="flex flex-col gap-5">
       <PrimaryProviderPicker />
 
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="default">
+          <Zap className="size-3" />
+          Primary Provider: {meta.label}
+        </Badge>
+        {hasFallback ? (
+          <Badge variant="outline">
+            <Check className="size-3" />
+            Fallback Available
+          </Badge>
+        ) : null}
+      </div>
+
       <ProviderKeys
-        provider="gemini"
-        title="Gemini API Keys"
-        placeholder="AIza… (paste Gemini key)"
-      />
-      <div className="h-px bg-border" />
-      <ProviderKeys
-        provider="openai"
-        title="OpenAI API Keys"
-        placeholder="sk-… (paste OpenAI key)"
-      />
-      <div className="h-px bg-border" />
-      <ProviderKeys
-        provider="mistral"
-        title="Mistral AI API Keys"
-        placeholder="… (paste Mistral key)"
+        provider={primaryProvider}
+        title={meta.title}
+        placeholder={meta.placeholder}
       />
 
       <p className="text-xs text-muted-foreground">
-        The primary provider is tried first for every image. The best compatible
-        model is detected automatically for each provider. If a model is
-        rate-limited or unavailable, the queue switches to the next compatible
-        model, then the next key, then the fallback providers automatically,
-        retries the same image, and continues without losing progress. Keys are
-        saved in browser
-        localStorage and loaded automatically. If no active keys are added, a
-        local engine generates results on-device.
+        Only the primary provider&apos;s keys are shown here. Keys for the other
+        providers stay saved and hidden, and they remain active as automatic
+        fallbacks in the background. The primary provider is tried first for
+        every image; if it is rate-limited or unavailable, the queue switches to
+        the next compatible model, then the next key, then the hidden fallback
+        providers automatically, retries the same image, and continues without
+        losing progress. Keys are saved in browser localStorage and loaded
+        automatically. If no active keys are added, a local engine generates
+        results on-device.
       </p>
     </div>
   );
@@ -129,7 +160,6 @@ function ProviderKeys({
   const addApiKey = useAppStore((state) => state.addApiKey);
   const updateApiKey = useAppStore((state) => state.updateApiKey);
   const removeApiKey = useAppStore((state) => state.removeApiKey);
-  const primaryProvider = useAppStore((state) => state.primaryProvider);
 
   const providerKeys = apiKeys.filter((entry) => entry.provider === provider);
 
@@ -218,13 +248,9 @@ function ProviderKeys({
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold tracking-tight">{title}</p>
-        {primaryProvider === provider ? (
-          <span className="text-xs text-muted-foreground">Primary</span>
-        ) : (
-          <Badge variant="outline" className="text-xs">
-            Fallback
-          </Badge>
-        )}
+        <Badge variant="secondary" className="text-xs">
+          Primary
+        </Badge>
       </div>
 
       <div className="flex flex-col gap-2">

@@ -64,21 +64,331 @@ export const SHUTTERSTOCK_CATEGORIES = [
 export const ADOBE_CATEGORY_IDS: Set<number> = new Set(
   ADOBE_CATEGORIES.map((c) => c.id)
 );
-export const SHUTTERSTOCK_CATEGORY_IDS: Set<number> = new Set(
-  SHUTTERSTOCK_CATEGORIES.map((c) => c.id)
-);
 
 export function isValidAdobeCategory(value: string): boolean {
   const id = Number(value.trim());
   return Number.isInteger(id) && ADOBE_CATEGORY_IDS.has(id);
 }
 
+const SHUTTERSTOCK_CATEGORY_ALIASES: Record<string, string[]> = {
+  Abstract: ["abstract", "fractal", "blur"],
+  "Animals/Wildlife": [
+    "animal",
+    "animals",
+    "wildlife",
+    "fauna",
+    "pet",
+    "pets",
+  ],
+  Arts: [
+    "art",
+    "artwork",
+    "painting",
+    "drawing",
+    "illustration",
+    "craft",
+    "crafts",
+    "sculpture",
+    "artist",
+  ],
+  "Backgrounds/Textures": [
+    "background",
+    "texture",
+    "textures",
+    "wallpaper",
+    "seamless",
+    "backdrop",
+  ],
+  "Beauty/Fashion": [
+    "beauty",
+    "fashion",
+    "cosmetic",
+    "cosmetics",
+    "makeup",
+    "hairstyle",
+    "jewelry",
+  ],
+  "Buildings/Landmarks": [
+    "building",
+    "buildings",
+    "architecture",
+    "architectural",
+    "landmark",
+    "landmarks",
+    "city",
+    "urban",
+    "skyline",
+    "house",
+  ],
+  "Business/Finance": [
+    "business",
+    "finance",
+    "financial",
+    "money",
+    "office",
+    "corporate",
+    "workplace",
+  ],
+  Celebrities: ["celebrity", "celebrities", "public figure", "red carpet"],
+  Education: [
+    "education",
+    "school",
+    "learning",
+    "student",
+    "students",
+    "graduation",
+    "classroom",
+    "university",
+  ],
+  "Food and Drink": [
+    "food",
+    "drink",
+    "drinks",
+    "cooking",
+    "kitchen",
+    "restaurant",
+    "cuisine",
+    "culinary",
+    "beverage",
+    "beverages",
+  ],
+  "Healthcare/Medical": [
+    "health",
+    "healthcare",
+    "medical",
+    "medicine",
+    "health care",
+    "wellness",
+    "hospital",
+    "doctor",
+    "nurse",
+    "pharmacy",
+  ],
+  Holidays: [
+    "holiday",
+    "holidays",
+    "christmas",
+    "easter",
+    "halloween",
+    "seasonal",
+    "festival",
+    "vacation",
+    "birthday",
+    "wedding",
+    "celebration",
+    "travel",
+    "tourism",
+  ],
+  Industrial: [
+    "industrial",
+    "industry",
+    "construction",
+    "factory",
+    "manufacturing",
+    "mining",
+    "machinery",
+    "tool",
+    "tools",
+  ],
+  Interiors: ["interior", "interiors", "indoors", "room"],
+  Miscellaneous: ["miscellaneous", "other", "generic", "misc"],
+  Nature: [
+    "nature",
+    "landscape",
+    "environment",
+    "plants",
+    "flowers",
+    "trees",
+    "sky",
+    "ocean",
+    "river",
+    "mountain",
+    "mountains",
+    "sunset",
+    "wilderness",
+    "forest",
+  ],
+  Objects: ["object", "objects", "product", "products", "still life", "item", "items"],
+  "Parks/Outdoor": [
+    "park",
+    "parks",
+    "outdoor",
+    "outdoors",
+    "camping",
+    "hiking",
+    "garden",
+    "playground",
+  ],
+  People: [
+    "people",
+    "person",
+    "man",
+    "woman",
+    "child",
+    "children",
+    "portrait",
+    "human",
+    "family",
+    "model",
+  ],
+  Religion: [
+    "religion",
+    "religious",
+    "spiritual",
+    "church",
+    "temple",
+    "faith",
+    "prayer",
+    "praying",
+  ],
+  Science: [
+    "science",
+    "scientific",
+    "chemistry",
+    "laboratory",
+    "lab",
+    "space",
+    "astronomy",
+    "biology",
+    "microscope",
+  ],
+  "Signs/Symbols": [
+    "sign",
+    "signs",
+    "symbol",
+    "symbols",
+    "icon",
+    "icons",
+    "logo",
+    "logos",
+    "flag",
+    "arrow",
+    "arrows",
+    "typography",
+  ],
+  "Sports/Recreation": [
+    "sport",
+    "sports",
+    "fitness",
+    "exercise",
+    "athlete",
+    "athletes",
+    "recreation",
+    "hobby",
+    "hobbies",
+    "yoga",
+    "cycling",
+    "running",
+  ],
+  Technology: [
+    "technology",
+    "tech",
+    "computer",
+    "phone",
+    "smartphone",
+    "gadget",
+    "gadgets",
+    "device",
+    "devices",
+    "electronics",
+    "digital",
+    "robot",
+    "software",
+  ],
+  Transportation: [
+    "transport",
+    "transportation",
+    "car",
+    "cars",
+    "automobile",
+    "vehicle",
+    "vehicles",
+    "airplane",
+    "train",
+    "bus",
+    "boat",
+    "bicycle",
+    "road",
+    "highway",
+  ],
+  Vintage: ["vintage", "retro", "antique", "nostalgia", "old fashioned", "sepia"],
+};
+
+function normalizeCategoryPart(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function matchShutterstockCategory(part: string): string | null {
+  const raw = part.trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const id = Number(raw);
+    const byId = SHUTTERSTOCK_CATEGORIES.find((c) => c.id === id);
+    return byId ? byId.label : null;
+  }
+
+  const normalized = normalizeCategoryPart(raw);
+
+  const exact = SHUTTERSTOCK_CATEGORIES.find(
+    (c) => normalizeCategoryPart(c.label) === normalized
+  );
+  if (exact) return exact.label;
+
+  for (const category of SHUTTERSTOCK_CATEGORIES) {
+    const aliases = SHUTTERSTOCK_CATEGORY_ALIASES[category.label] ?? [];
+    if (aliases.some((alias) => normalizeCategoryPart(alias) === normalized))
+      return category.label;
+  }
+
+  if (normalized.length >= 3) {
+    for (const category of SHUTTERSTOCK_CATEGORIES) {
+      const name = normalizeCategoryPart(category.label);
+      if (name.includes(normalized) || normalized.includes(name))
+        return category.label;
+    }
+  }
+
+  let best: { label: string; score: number } | null = null;
+  const words = new Set(normalized.split(" ").filter((w) => w.length > 2));
+  for (const category of SHUTTERSTOCK_CATEGORIES) {
+    const corpus = [
+      category.label,
+      ...(SHUTTERSTOCK_CATEGORY_ALIASES[category.label] ?? []),
+    ]
+      .map(normalizeCategoryPart)
+      .join(" ");
+    let score = 0;
+    for (const word of words) if (corpus.includes(word)) score++;
+    if (score > 0 && (!best || score > best.score))
+      best = { label: category.label, score };
+  }
+  return best ? best.label : null;
+}
+
+export function normalizeShutterstockCategories(value: string): string[] {
+  const out: string[] = [];
+  for (const part of value.split(",")) {
+    const matched = matchShutterstockCategory(part);
+    if (matched && !out.includes(matched)) out.push(matched);
+    if (out.length >= 2) break;
+  }
+  if (out.length === 0) out.push("Miscellaneous");
+  return out;
+}
+
 export function isValidShutterstockCategories(value: string): boolean {
-  const ids = value
+  const parts = value
     .split(",")
-    .map((part) => Number(part.trim()))
-    .filter((id) => Number.isInteger(id) && SHUTTERSTOCK_CATEGORY_IDS.has(id));
-  return ids.length >= 1 && ids.length <= 2;
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 1 || parts.length > 2) return false;
+  return parts.every((part) => matchShutterstockCategory(part) !== null);
 }
 
 export function categoryLabel(

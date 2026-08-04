@@ -1,5 +1,12 @@
-import type { CsvFormat, GenerationResult } from "@/lib/types";
-import { CSV_MAX_ROWS, FILENAME_MAX } from "@/lib/stock-spec";
+import type { CsvFormat, GenerationResult, StockMetadata } from "@/lib/types";
+import {
+  CSV_MAX_ROWS,
+  FILENAME_MAX,
+  SHUTTERSTOCK_KEYWORDS_MAX,
+  SHUTTERSTOCK_KEYWORDS_MIN,
+  SHUTTERSTOCK_TITLE_MAX,
+  normalizeShutterstockCategories,
+} from "@/lib/stock-spec";
 
 export type ResolvedFilename = {
   original: string;
@@ -107,19 +114,126 @@ function adobeRows(
   }));
 }
 
+function uniqueKeywords(keywords: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const keyword of keywords) {
+    const clean = keyword.trim();
+    if (!clean || clean.includes(",")) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
+}
+
+const SHUTTERSTOCK_STOPWORDS = new Set([
+  "the",
+  "and",
+  "with",
+  "from",
+  "into",
+  "over",
+  "under",
+  "this",
+  "that",
+  "they",
+  "them",
+  "their",
+  "there",
+  "these",
+  "those",
+  "have",
+  "were",
+  "with",
+  "aerial",
+  "view",
+]);
+
+function wordsFrom(text: string): string[] {
+  return text
+    .split(/[^A-Za-z0-9'’-]+/)
+    .map((word) => word.trim().toLowerCase())
+    .filter(
+      (word) => word.length >= 3 && !SHUTTERSTOCK_STOPWORDS.has(word)
+    );
+}
+
+function fitShutterstockDescription(value: string): string {
+  const text = value.trim();
+  if (!text) return "Stock photo.";
+  if (text.length <= SHUTTERSTOCK_TITLE_MAX) return text;
+  const words = text.split(/\s+/);
+  let result = "";
+  for (const word of words) {
+    const next = result ? `${result} ${word}` : word;
+    if (next.length > SHUTTERSTOCK_TITLE_MAX) break;
+    result = next;
+  }
+  return result;
+}
+
+const SHUTTERSTOCK_FALLBACK_KEYWORDS = [
+  "photo",
+  "image",
+  "picture",
+  "stock",
+  "background",
+  "scene",
+  "subject",
+];
+
+export function fixShutterstockMetadata(meta: StockMetadata): StockMetadata {
+  const description = fitShutterstockDescription(meta.description || meta.title);
+  const category = normalizeShutterstockCategories(meta.category).join(", ");
+
+  let keywords = uniqueKeywords(meta.keywords);
+  if (keywords.length > SHUTTERSTOCK_KEYWORDS_MAX)
+    keywords = keywords.slice(0, SHUTTERSTOCK_KEYWORDS_MAX);
+
+  const seen = new Set(keywords.map((keyword) => keyword.toLowerCase()));
+  if (keywords.length < SHUTTERSTOCK_KEYWORDS_MIN) {
+    const pool = [...wordsFrom(description), ...wordsFrom(meta.title), ...keywords];
+    for (const word of pool) {
+      if (keywords.length >= SHUTTERSTOCK_KEYWORDS_MIN) break;
+      const key = word.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      keywords.push(word);
+    }
+  }
+  for (const keyword of SHUTTERSTOCK_FALLBACK_KEYWORDS) {
+    if (keywords.length >= SHUTTERSTOCK_KEYWORDS_MIN) break;
+    if (seen.has(keyword)) continue;
+    seen.add(keyword);
+    keywords.push(keyword);
+  }
+
+  return {
+    title: meta.title.trim() || description,
+    description,
+    keywords,
+    category,
+  };
+}
+
 function shutterstockRows(
   results: GenerationResult[],
   filenames: ResolvedFilename[]
 ) {
-  return results.map((result, index) => ({
-    Filename: filenames[index].name,
-    Description: result.metadata.shutterstock.description,
-    Keywords: result.metadata.shutterstock.keywords.join(", "),
-    Categories: result.metadata.shutterstock.category,
-    Illustration: "No",
-    "Mature Content": "No",
-    Editorial: "No",
-  }));
+  return results.map((result, index) => {
+    const meta = fixShutterstockMetadata(result.metadata.shutterstock);
+    return {
+      Filename: filenames[index].name,
+      Description: meta.description,
+      Keywords: meta.keywords.join(", "),
+      Categories: meta.category,
+      Illustration: "No",
+      "Mature Content": "No",
+      Editorial: "No",
+    };
+  });
 }
 
 export async function exportAdobeCsv(

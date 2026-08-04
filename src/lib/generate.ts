@@ -15,7 +15,7 @@ import {
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
   isValidAdobeCategory,
-  isValidShutterstockCategories,
+  normalizeShutterstockCategories,
 } from "@/lib/stock-spec";
 import {
   IMAGE_API_MAX_DIMENSION,
@@ -514,7 +514,7 @@ function buildMetadata(image: ImageAsset, seed: number): GeneratedMetadata {
         ]
       : null;
   const ssCategories = String(
-    ssPrimary.id + (ssSecondary ? `, ${ssSecondary.id}` : "")
+    ssPrimary.label + (ssSecondary ? `, ${ssSecondary.label}` : "")
   );
 
   return {
@@ -683,8 +683,8 @@ function normalize(
       ? isValidAdobeCategory(rawCategory)
         ? rawCategory
         : fallback.category
-      : isValidShutterstockCategories(rawCategory)
-        ? rawCategory
+      : rawCategory.trim()
+        ? normalizeShutterstockCategories(rawCategory).join(", ")
         : fallback.category;
 
   const title = String(value.title ?? "").trim();
@@ -836,7 +836,7 @@ const ADOBE_CATEGORY_GUIDE = ADOBE_CATEGORIES.map(
   (c) => `${c.id} ${c.label}`
 ).join(", ");
 const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
-  (c) => `${c.id} ${c.label}`
+  (c) => c.label
 ).join(", ");
 
 const VISUAL_ANALYSIS_PROMPT = `You are a meticulous visual analyst for professional stock photography and vector/design assets. Examine the image region by region and zoom into fine details. Describe ONLY what is clearly visible. Never guess, assume, or invent content - if something is not clearly visible, leave the field empty ("" or []).
@@ -1008,7 +1008,7 @@ DESCRIPTION (Shutterstock only):
 
 PLATFORM RULES:
 - Adobe: title 60-70 characters, no commas; keywords <=49 unique; category = ONE ID from: ${ADOBE_CATEGORY_GUIDE}
-- Shutterstock: title <=2048 chars; description <=2048 chars; keywords 7-50 unique; category = 1-2 IDs comma-separated from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
+- Shutterstock: title <=2048 chars; description <=2048 chars; keywords 7-50 unique; category = 1-2 official category NAMES comma-separated, using the exact names from: ${SHUTTERSTOCK_CATEGORY_GUIDE}
 
 BEFORE returning, self-validate: does every keyword exist visually in the analysis? does the title accurately describe the visible content? does the description summarize only visible content? Remove every weak, generic, or misleading keyword. Precision over quantity.
 

@@ -2,8 +2,8 @@
 
 import { CheckCircle2, Download, FileSpreadsheet, RotateCcw } from "lucide-react"
 
-import { exportAdobeCsv, exportShutterstockCsv, resolveExportFilenames } from "@/lib/export"
-import { validateResults } from "@/lib/validation"
+import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
+import { validateMetadata, validateResults } from "@/lib/validation"
 import { Modal } from "@/components/feedback/modal"
 import { Button } from "@/components/ui/button"
 import { useGenerate } from "@/hooks/use-generate"
@@ -17,18 +17,46 @@ export function SuccessDialog() {
   const { run } = useGenerate();
 
   const handleExport = async (format: "adobe" | "shutterstock") => {
-    const errors = validateResults(results, format);
-    if (errors.length > 0) {
-      const sample = errors
-        .slice(0, 2)
-        .map((error) => `${error.filename}: ${error.issues.join("; ")}`)
-        .join("\n");
-      toast(
-        "error",
-        "Cannot export",
-        `${errors.length} row${errors.length > 1 ? "s" : ""} not compliant:\n${sample}`
-      );
-      return;
+    if (format === "adobe") {
+      const errors = validateResults(results, "adobe");
+      if (errors.length > 0) {
+        const sample = errors
+          .slice(0, 2)
+          .map((error) => `${error.filename}: ${error.issues.join("; ")}`)
+          .join("\n");
+        toast(
+          "error",
+          "Cannot export",
+          `${errors.length} row${errors.length > 1 ? "s" : ""} not compliant:\n${sample}`
+        );
+        return;
+      }
+    } else {
+      let fixed = 0;
+      for (const result of results) {
+        if (
+          validateMetadata(
+            result.metadata.shutterstock,
+            "shutterstock"
+          ).length === 0
+        )
+          continue;
+        const corrected = fixShutterstockMetadata(
+          result.metadata.shutterstock
+        );
+        useAppStore.getState().updateResult(result.id, (current) => ({
+          ...current,
+          metadata: { ...current.metadata, shutterstock: corrected },
+        }));
+        fixed++;
+      }
+      if (fixed > 0) {
+        toast(
+          "info",
+          "CSV auto-corrected",
+          `${fixed} row${fixed === 1 ? "" : "s"} fixed to match the Shutterstock CSV format before export.`
+        );
+      }
     }
     try {
       if (format === "adobe") await exportAdobeCsv(results);

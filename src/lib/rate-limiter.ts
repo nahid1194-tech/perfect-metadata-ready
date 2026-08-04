@@ -2,47 +2,58 @@ import type { ApiProvider, GenerationSpeed } from "@/lib/types";
 import { useAppStore } from "@/store/use-app-store";
 
 const REQUEST_DELAY_RANGE_MS: Record<GenerationSpeed, [number, number]> = {
-  fast: [500, 1000],
+  "super-fast": [0, 0],
+  fast: [300, 600],
   normal: [2000, 3000],
-  slow: [5000, 8000],
 };
 
 const RETRY_DELAY_MS: Record<GenerationSpeed, number> = {
+  "super-fast": 300,
   fast: 500,
   normal: 2000,
-  slow: 5000,
 };
 
 const KEY_ROTATION_DELAY_MS: Record<GenerationSpeed, number> = {
-  fast: 0,
+  "super-fast": 0,
+  fast: 150,
   normal: 400,
-  slow: 1500,
 };
 
 const PROVIDER_SWITCH_DELAY_MS: Record<GenerationSpeed, number> = {
-  fast: 0,
+  "super-fast": 0,
+  fast: 250,
   normal: 500,
-  slow: 2000,
 };
 
 const QUEUE_DELAY_MS: Record<GenerationSpeed, number> = {
-  fast: 0,
+  "super-fast": 0,
+  fast: 150,
   normal: 400,
-  slow: 1500,
 };
 
 const CONCURRENCY: Record<GenerationSpeed, number> = {
-  fast: 2,
+  "super-fast": 0,
+  fast: 3,
   normal: 1,
-  slow: 1,
 };
 
+const SPEEDS: GenerationSpeed[] = ["super-fast", "fast", "normal"];
+
+export function normalizeSpeed(value: unknown): GenerationSpeed {
+  return SPEEDS.includes(value as GenerationSpeed) ? (value as GenerationSpeed) : "normal";
+}
+
 export function currentSpeed(): GenerationSpeed {
-  return useAppStore.getState().settings.generationSpeed ?? "normal";
+  return normalizeSpeed(useAppStore.getState().settings.generationSpeed);
 }
 
 function randomBetween(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+export function superFastConcurrency(activeKeyCount: number): number {
+  const base = Math.max(1, activeKeyCount * 2);
+  return Math.min(8, base);
 }
 
 export function requestDelayMs(): number {
@@ -67,7 +78,13 @@ export function queueDelayMs(): number {
 }
 
 export function currentConcurrency(): number {
-  return CONCURRENCY[currentSpeed()];
+  const speed = currentSpeed();
+  if (speed === "super-fast") {
+    const keys = useAppStore.getState().apiKeys;
+    const active = keys.filter((key) => key.enabled).length;
+    return superFastConcurrency(active);
+  }
+  return CONCURRENCY[speed];
 }
 
 function sleepCancellable(ms: number, signal?: AbortSignal): Promise<void> {

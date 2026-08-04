@@ -33,6 +33,7 @@ import {
 } from "@/lib/models";
 import {
   currentConcurrency,
+  currentSpeed,
   keyRotationDelayMs,
   providerSwitchDelayMs,
   queueDelayMs,
@@ -638,10 +639,15 @@ export async function runQueue(
   const processTracked = async (image: ImageAsset): Promise<void> => {
     const ok = await processOne(image);
     completed++;
-    if (ok) success++;
-    else failed.push(image.id);
-    store.setBatchCompleted(completed);
-    store.setProgress(Math.round((completed / targets.length) * 100));
+    if (ok) {
+      success++;
+      const index = failed.indexOf(image.id);
+      if (index !== -1) failed.splice(index, 1);
+    } else if (!failed.includes(image.id)) {
+      failed.push(image.id);
+    }
+    store.setBatchCompleted(Math.min(completed, targets.length));
+    store.setProgress(Math.min(100, Math.round((completed / targets.length) * 100)));
     if (completed > 0) {
       const averageMs = (Date.now() - startedAt) / completed;
       store.setEta(
@@ -650,29 +656,36 @@ export async function runQueue(
     }
   };
 
-  let nextIndex = 0;
-  while (nextIndex < targets.length) {
-    if (stopRequested) break;
-    while (pauseRequested) {
-      if (stopRequested) break;
-      store.setQueueState("paused");
-      await sleep(160);
-    }
-    if (stopRequested) break;
-    store.setQueueState("running");
-
+  const pool = async (items: ImageAsset[]): Promise<void> => {
+    let nextIndex = 0;
     const concurrency = Math.max(1, currentConcurrency());
-    const batch = targets.slice(nextIndex, nextIndex + concurrency);
-    nextIndex += batch.length;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        if (stopRequested) return;
+        while (pauseRequested) {
+          if (stopRequested) return;
+          store.setQueueState("paused");
+          await sleep(160);
+        }
+        if (stopRequested) return;
+        store.setQueueState("running");
+        const index = nextIndex++;
+        if (index >= items.length) return;
+        await processTracked(items[index]);
+        if (hasApiKeys) await sleepBetweenImages();
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  };
 
-    await Promise.all(batch.map((image) => processTracked(image)));
-
-    if (nextIndex < targets.length && hasApiKeys) {
-      await sleepBetweenImages();
-    }
-  }
+  await pool(targets);
 
   const cancelled = stopRequested;
+
+  if (!cancelled && currentSpeed() === "super-fast" && failed.length > 0) {
+    const retryTargets = targets.filter((image) => failed.includes(image.id));
+    await pool(retryTargets);
+  }
 
   active = false;
   stopRequested = false;

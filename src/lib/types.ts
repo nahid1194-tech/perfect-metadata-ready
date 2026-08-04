@@ -65,7 +65,7 @@ export type ApiKeyEntry = {
 
 export type Marketplace = "adobe" | "shutterstock";
 
-export type GenerationSpeed = "fast" | "balanced" | "slow" | "smart";
+export type GenerationSpeed = "fast" | "normal" | "slow";
 
 export type GenerationSettings = {
   platform: Marketplace;

@@ -2,7 +2,7 @@
 
 import { Aperture, Camera } from "lucide-react"
 
-import type { GenerationSpeed, Marketplace } from "@/lib/types"
+import type { Marketplace } from "@/lib/types"
 import { MARKETPLACES, marketplaceFormat } from "@/lib/marketplace"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -15,33 +15,6 @@ const PLATFORM_ICONS: Record<Marketplace, React.ComponentType<{ className?: stri
   shutterstock: Camera,
 };
 
-const GENERATION_SPEEDS: {
-  id: GenerationSpeed;
-  label: string;
-  description: string;
-}[] = [
-  {
-    id: "fast",
-    label: "Fast",
-    description: "Minimal delay, maximum throughput",
-  },
-  {
-    id: "balanced",
-    label: "Balanced",
-    description: "1s between requests",
-  },
-  {
-    id: "slow",
-    label: "Slow",
-    description: "Conservative pacing",
-  },
-  {
-    id: "smart",
-    label: "Smart",
-    description: "Auto-adapts between 1–10s",
-  },
-];
-
 export function MetadataSettings() {
   const settings = useAppStore((state) => state.settings);
   const setSettings = useAppStore((state) => state.setSettings);
@@ -50,36 +23,6 @@ export function MetadataSettings() {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm font-semibold tracking-tight">Metadata Settings</p>
-
-      <div className="flex flex-col gap-2.5">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Generation Speed
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          {GENERATION_SPEEDS.map(({ id, label, description }) => {
-            const active = settings.generationSpeed === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setSettings({ generationSpeed: id })}
-                aria-pressed={active}
-                className={cn(
-                  "flex flex-col gap-0.5 rounded-xl border px-2.5 py-2 text-left transition-colors",
-                  active
-                    ? "border-primary bg-primary/5 text-foreground ring-2 ring-primary/20"
-                    : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                )}
-              >
-                <span className="text-sm font-medium">{label}</span>
-                <span className="text-[11px] leading-tight opacity-80">
-                  {description}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
       <div className="flex flex-col gap-2.5">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">

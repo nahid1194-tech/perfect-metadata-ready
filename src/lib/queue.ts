@@ -31,6 +31,13 @@ import {
   modelListFor,
   refreshProviderModels,
 } from "@/lib/models";
+import {
+  currentConcurrency,
+  keyRotationDelayMs,
+  providerSwitchDelayMs,
+  queueDelayMs,
+  retryDelayMs,
+} from "@/lib/rate-limiter";
 import type {
   ApiProvider,
   GenerationResult,
@@ -43,8 +50,7 @@ import { toast } from "@/store/use-toast-store";
 let active = false;
 let stopRequested = false;
 let pauseRequested = false;
-let currentController: AbortController | null = null;
-let currentImageId: string | null = null;
+const activeControllers = new Map<string, AbortController>();
 
 let preferredProvider: ApiProvider = "gemini";
 let recoveryProbeRunning = false;
@@ -53,9 +59,6 @@ const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-const IMAGE_DELAY_MIN_MS = 400;
-const IMAGE_DELAY_MAX_MS = 800;
 
 function updateDebug(
   activeProvider: ApiProvider | null,
@@ -165,8 +168,7 @@ function sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 async function sleepBetweenImages(): Promise<void> {
-  const delayMs =
-    IMAGE_DELAY_MIN_MS + Math.random() * (IMAGE_DELAY_MAX_MS - IMAGE_DELAY_MIN_MS);
+  const delayMs = queueDelayMs();
   const chunk = 120;
   let elapsed = 0;
   while (elapsed < delayMs) {
@@ -206,7 +208,7 @@ async function waitForRateLimit(
   });
   useAppStore.getState().setQueueState("paused");
   toast("info", "Rate limit reached", message);
-  await sleepCancellable(error.delayMs, controller.signal);
+  await sleepCancellable(Math.max(error.delayMs, retryDelayMs()), controller.signal);
   useAppStore.getState().patchQueueItem(image.id, {
     status: "analyzing",
     statusMessage: null,
@@ -291,8 +293,9 @@ async function generateWithKeys(
             sawRateLimit = true;
             waitUntil = Math.min(waitUntil, until);
             console.log(
-              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), trying the next compatible model`
+              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), waiting ${retryDelayMs()}ms before retrying`
             );
+            await sleepCancellable(retryDelayMs(), signal);
             break;
           }
           if (isModelUnavailable(error)) {
@@ -305,12 +308,13 @@ async function generateWithKeys(
           }
           if (isNetworkError(error) && networkRetries < 2) {
             networkRetries++;
-            await sleep(600);
+            await sleep(retryDelayMs());
             continue;
           }
           if (isInvalidImageError(error)) throw error;
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
+            await sleepCancellable(keyRotationDelayMs(), signal);
             notifyApiKeySwitch(provider, keyIndex + 1);
             continue keyLoop;
           }
@@ -327,6 +331,7 @@ async function generateWithKeys(
       );
     }
     if (keyIndex < orderedKeys.length - 1) {
+      await sleepCancellable(keyRotationDelayMs(), signal);
       notifyApiKeySwitch(provider, keyIndex + 1);
     }
   }
@@ -387,6 +392,7 @@ async function generateWithProviders(
       lastError = error;
       if (index < order.length - 1) {
         const next = order[index + 1];
+        await sleepCancellable(providerSwitchDelayMs(), signal);
         preferredProvider = next;
         logProviderState(
           next,
@@ -462,8 +468,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   }
 
   const controller = new AbortController();
-  currentController = controller;
-  currentImageId = image.id;
+  activeControllers.set(image.id, controller);
 
   updateDebug(
     null,
@@ -543,7 +548,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
         "Add or enable an API key, then resume the queue."
       );
     }
-    if (currentController === controller) currentController = null;
+    activeControllers.delete(image.id);
     return false;
   }
 
@@ -568,7 +573,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
     statusMessage: null,
   });
 
-  if (currentController === controller) currentController = null;
+  activeControllers.delete(image.id);
   return true;
 }
 
@@ -608,8 +613,7 @@ export async function runQueue(
   active = true;
   stopRequested = false;
   pauseRequested = false;
-  currentController = null;
-  currentImageId = null;
+  activeControllers.clear();
   preferredProvider = store.primaryProvider;
   toast(
     "info",
@@ -631,7 +635,23 @@ export async function runQueue(
   let completed = 0;
   const failed: string[] = [];
 
-  for (let index = 0; index < targets.length; index++) {
+  const processTracked = async (image: ImageAsset): Promise<void> => {
+    const ok = await processOne(image);
+    completed++;
+    if (ok) success++;
+    else failed.push(image.id);
+    store.setBatchCompleted(completed);
+    store.setProgress(Math.round((completed / targets.length) * 100));
+    if (completed > 0) {
+      const averageMs = (Date.now() - startedAt) / completed;
+      store.setEta(
+        Math.max(0, Math.round(((targets.length - completed) * averageMs) / 1000))
+      );
+    }
+  };
+
+  let nextIndex = 0;
+  while (nextIndex < targets.length) {
     if (stopRequested) break;
     while (pauseRequested) {
       if (stopRequested) break;
@@ -641,22 +661,13 @@ export async function runQueue(
     if (stopRequested) break;
     store.setQueueState("running");
 
-    const image = targets[index];
-    const ok = await processOne(image);
-    completed++;
-    if (ok) success++;
-    else failed.push(image.id);
+    const concurrency = Math.max(1, currentConcurrency());
+    const batch = targets.slice(nextIndex, nextIndex + concurrency);
+    nextIndex += batch.length;
 
-    store.setBatchCompleted(completed);
-    store.setProgress(Math.round((completed / targets.length) * 100));
-    if (completed > 0) {
-      const averageMs = (Date.now() - startedAt) / completed;
-      store.setEta(
-        Math.max(0, Math.round(((targets.length - completed) * averageMs) / 1000))
-      );
-    }
+    await Promise.all(batch.map((image) => processTracked(image)));
 
-    if (index < targets.length - 1 && hasApiKeys) {
+    if (nextIndex < targets.length && hasApiKeys) {
       await sleepBetweenImages();
     }
   }
@@ -666,8 +677,7 @@ export async function runQueue(
   active = false;
   stopRequested = false;
   pauseRequested = false;
-  currentController = null;
-  currentImageId = null;
+  activeControllers.clear();
 
   store.setQueueState("idle");
   store.setGenerating(false);
@@ -733,13 +743,14 @@ export function stopQueue(): void {
   if (!active) return;
   stopRequested = true;
   pauseRequested = false;
-  currentController?.abort();
+  for (const controller of activeControllers.values()) {
+    controller.abort();
+  }
   useAppStore.getState().setQueueState("stopped");
 }
 
 export function cancelImage(imageId: string): void {
-  if (currentImageId !== imageId || !currentController) return;
-  currentController.abort();
+  activeControllers.get(imageId)?.abort();
 }
 
 export async function retryImage(imageId: string): Promise<void> {
@@ -761,8 +772,7 @@ export async function retryImage(imageId: string): Promise<void> {
   active = true;
   stopRequested = false;
   pauseRequested = false;
-  currentController = null;
-  currentImageId = null;
+  activeControllers.clear();
   preferredProvider = useAppStore.getState().primaryProvider;
   toast(
     "info",
@@ -787,8 +797,7 @@ export async function retryImage(imageId: string): Promise<void> {
     active = false;
     stopRequested = false;
     pauseRequested = false;
-    currentController = null;
-    currentImageId = null;
+    activeControllers.clear();
     useAppStore.getState().setGenerating(false);
     useAppStore.getState().setQueueState("idle");
     useAppStore.getState().setEta(null);

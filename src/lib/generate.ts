@@ -27,11 +27,7 @@ import {
   describeBackground,
   detectBackground,
 } from "@/lib/background";
-import {
-  noteProviderRateLimit,
-  noteProviderSuccess,
-  waitForProviderSlot,
-} from "@/lib/rate-limiter";
+import { waitForProviderSlot } from "@/lib/rate-limiter";
 import { useAppStore } from "@/store/use-app-store";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -347,7 +343,7 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
-  generationSpeed: "smart",
+  generationSpeed: "normal",
 };
 
 function hashString(input: string): number {
@@ -1294,18 +1290,15 @@ async function callGemini(
   });
 
   if (!response.ok) {
-    const error = buildApiError(
+    throw buildApiError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`,
       response.headers.get("retry-after")
     );
-    if (isRateLimited(error)) noteProviderRateLimit("gemini");
-    throw error;
   }
 
-  noteProviderSuccess("gemini");
   const json = data as GeminiCandidatesBody | null;
   return (
     json?.candidates?.[0]?.content?.parts
@@ -1436,17 +1429,14 @@ async function callOpenAI(
   });
 
   if (!response.ok) {
-    const error = buildOpenAIError(
+    throw buildOpenAIError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`
     );
-    if (isRateLimited(error)) noteProviderRateLimit("openai");
-    throw error;
   }
 
-  noteProviderSuccess("openai");
   const json = data as
     | { choices?: Array<{ message?: { content?: string } }> }
     | null;
@@ -1545,17 +1535,14 @@ async function callMistral(
   });
 
   if (!response.ok) {
-    const error = buildMistralError(
+    throw buildMistralError(
       data,
       rawBody,
       response.status,
       `API request failed (${response.status})`
     );
-    if (isRateLimited(error)) noteProviderRateLimit("mistral");
-    throw error;
   }
 
-  noteProviderSuccess("mistral");
   const json = data as
     | { choices?: Array<{ message?: { content?: string } }> }
     | null;

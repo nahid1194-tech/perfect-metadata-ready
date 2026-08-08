@@ -946,19 +946,53 @@ const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
   (c) => c.label
 ).join(", ");
 
-const SINGLE_SHOT_PROMPT = `You are an expert Adobe Stock and Shutterstock metadata generator. Look at the image and produce accurate, specific, commercially useful metadata. Only describe what is clearly visible. Never invent objects, text, logos, brands, people's names, or other copyrighted content.
+const SINGLE_SHOT_PROMPT = `You are an expert Adobe Stock and Shutterstock metadata generator. Before writing anything, analyze the ENTIRE image thoroughly: main subject, secondary subjects, objects, people and their actions, environment, context, style, medium, design type, colors, composition, orientation, background, lighting, visual concepts, and every clearly visible detail. Only describe what is visually or contextually supported. Never invent objects, text, logos, brands, people's names, or other copyrighted content.
 
 Reply with ONLY this exact JSON (no markdown, no comments, no extra fields):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
 
-RULES
-- TITLE: specific, natural English; main subject + setting + key details; no filler or keyword stuffing. Must NEVER exceed the character limit from USER PREFERENCES and must ALWAYS end on a complete word. If the title is too long, rewrite it more concisely — never cut or truncate a word.
-- KEYWORDS: exactly the number specified in USER PREFERENCES (the count must match exactly). Complete, correctly spelled words or short phrases; prefer singular; no duplicates; no truncated words; drop generic filler (beautiful, background, concept, design, art, photo, image, high quality, etc.); never use brands, logos, trademarks, or artist names. Order by buyer intent (most searched first).
-- adobe.title: no commas. adobe.category: the single numeric ID whose label best fits, from this list (ID Label): {ADOBE}
-- shutterstock.description: 1-2 factual sentences (subject, setting, action, mood); no marketing language.
-- shutterstock.category: 1-2 exact official category names from this list: {SS}
+TITLE
+- Natural, specific, professional English. NEVER a comma-separated list of keywords and NEVER keyword-stuffed.
+- Structure when appropriate: [Main Subject] + [Action/Context] + [Style/Design Type] + [Color/Composition].
+- Put the primary subject and primary concept in the FIRST 4-7 words whenever possible.
+- Examples:
+  BAD: "Vector icon, agriculture, plant, leaf, green, logo design"
+  GOOD: "Minimalist vector icon of a green plant sprout for agriculture branding"
+  BAD: "Car, sports car, old car, vintage, fast"
+  GOOD: "Classic vintage sports car parked in a studio with a clean minimalist background"
+- Must NEVER exceed the character limit in USER PREFERENCES and must ALWAYS end on a complete word. If the title is too long, rewrite it shorter and more concisely — never cut or truncate a word.
+- Do NOT repeat the same concept unnecessarily and do NOT add anything that cannot be confirmed from the image.
+- adobe.title: no commas.
+
+KEYWORDS
+- Provide EXACTLY the count specified in USER PREFERENCES for BOTH adobe.keywords and shutterstock.keywords.
+- RELEVANCE AND ACCURACY COME FIRST: never add an irrelevant term just to reach the count; instead find genuinely specific, useful terms (subject details, actions, important objects, style, medium, colors, composition, background, context, commercial concepts).
+- Order strictly by search importance: the FIRST 5-10 keywords must be the strongest, most searchable terms a buyer would type (primary subject first, then action/context, important objects, style/medium, main concepts, secondary concepts, color, composition/background, commercial concepts). Do NOT shuffle them randomly.
+- Complete, correctly spelled words or short phrases; prefer singular where natural; no duplicates or near-duplicates; no truncated words.
+- Drop generic filler (beautiful, photo, image, high quality, background, concept, design...) UNLESS the VERIFIED BACKGROUND FACTS explicitly require a specific background term such as "white background", "black background", or "transparent background".
+- Never use brands, logos, trademarks, artist names, or unrelated trending terms.
+
+CONSISTENCY
+- The title and keywords must describe the SAME image. Never write a title about one concept and keywords about another. Every major concept in the title must be supported by the image and reflected in the keywords.
+
+CATEGORY
+- adobe.category: the single numeric ID whose label best fits the actual asset type and subject (never choose a category just because it is common), from this list (ID Label): {ADOBE}
+- shutterstock.category: 1-2 exact official category names that match the asset, from this list: {SS}
+
+SHUTTERSTOCK DESCRIPTION
+- 1-2 factual sentences (subject, setting, action, mood); no marketing language.
+
+OTHER
 - gender, ethnicity, age, and profession terms ONLY when clearly visible.
-- Before finalizing, self-check: is the keyword count exactly as requested? does every keyword reflect visible content? is the title within the character limit and ending on a complete word? fix anything that fails.`;
+- Keep the VERIFIED BACKGROUND FACTS accurate: never claim a white, transparent, black, or isolated background unless the facts confirm it.
+
+FINAL SELF-CHECK before outputting:
+- Does the title accurately describe the image, stay within the character limit, end on a complete word, and read naturally (not a keyword list)?
+- Are the first 5-10 keywords the strongest and most searchable?
+- Is the keyword count exactly as requested, with no duplicates, no truncated words, and nothing irrelevant?
+- Is the background stated correctly and is the category correct?
+- Did you invent anything? Would a real buyer searching for this exact asset find these terms useful?
+Fix anything that fails.`;
 
 function buildSingleShotPrompt(
   settings: GenerationSettings,

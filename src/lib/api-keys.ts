@@ -42,6 +42,10 @@ export function markKeyRateLimited(keyId: string, until: number): void {
   cooldowns.push({ keyId, until });
 }
 
+export function clearKeyCooldown(keyId: string): void {
+  cooldowns = cooldowns.filter((entry) => entry.keyId !== keyId);
+}
+
 export function keyCooldownUntil(keyId: string, now: number): number | null {
   const entry = cooldowns.find((item) => item.keyId === keyId);
   if (!entry) return null;

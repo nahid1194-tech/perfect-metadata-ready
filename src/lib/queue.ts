@@ -7,6 +7,7 @@ import {
   rotateKeys,
 } from "@/lib/api-keys";
 import { resultCacheKey } from "@/lib/cache";
+import { applyGenerationFailure, applyGenerationSuccess } from "@/lib/key-health";
 import {
   friendlyApiError,
   generateLocal,
@@ -280,7 +281,9 @@ async function generateWithKeys(
               : provider === "openai"
                 ? generateWithOpenAI
                 : generateWithMistral;
-          return await generate(image, key.key, model, settings, signal);
+          const result = await generate(image, key.key, model, settings, signal);
+          applyGenerationSuccess(key.id);
+          return result;
         } catch (error) {
           if (signal.aborted) throw error;
           if (isRateLimited(error)) {
@@ -288,6 +291,7 @@ async function generateWithKeys(
             sawRateLimit = true;
             waitUntil = Math.min(waitUntil, until);
             markKeyRateLimited(key.id, until);
+            applyGenerationFailure(key.id, error);
             console.log(
               `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), switching to the next active key`
             );
@@ -299,6 +303,7 @@ async function generateWithKeys(
           if (isModelUnavailable(error)) {
             sawModelUnavailable = true;
             nonRateLimitError ??= error;
+            applyGenerationFailure(key.id, error);
             console.log(
               `[${provider}] Model ${model} unavailable/busy, trying the next compatible model`
             );
@@ -312,6 +317,7 @@ async function generateWithKeys(
           if (isInvalidImageError(error)) throw error;
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
+            applyGenerationFailure(key.id, error);
             if (keyIndex < orderedKeys.length - 1) {
               notifyApiKeySwitch(provider, keyIndex + 1);
             }

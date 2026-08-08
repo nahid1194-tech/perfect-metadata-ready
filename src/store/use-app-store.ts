@@ -138,6 +138,8 @@ type AppState = {
   setGitConfig: (patch: Partial<GitSyncConfig>) => void;
   gitPushStatus: GitPushStatus;
   setGitPushStatus: (patch: Partial<GitPushStatus>) => void;
+  keyHealthCheckedAt: number | null;
+  setKeyHealthCheckedAt: (timestamp: number | null) => void;
 };
 
 export const useAppStore = create<AppState>()(
@@ -170,6 +172,8 @@ export const useAppStore = create<AppState>()(
       settings: DEFAULT_SETTINGS,
       gitConfig: DEFAULT_GIT_CONFIG,
       gitPushStatus: DEFAULT_GIT_PUSH_STATUS,
+      keyHealthCheckedAt: null,
+      setKeyHealthCheckedAt: (timestamp) => set({ keyHealthCheckedAt: timestamp }),
       setTheme: (theme) => set({ theme }),
       setApiKeys: (apiKeys) => set({ apiKeys }),
       addApiKey: (entry) =>
@@ -347,6 +351,7 @@ export const useAppStore = create<AppState>()(
         resultCache: state.resultCache,
         autoScroll: state.autoScroll,
         gitConfig: state.gitConfig,
+        keyHealthCheckedAt: state.keyHealthCheckedAt,
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as (Partial<AppState> & {
@@ -441,6 +446,9 @@ export const useAppStore = create<AppState>()(
           };
         } else {
           merged.gitConfig = { ...DEFAULT_GIT_CONFIG };
+        }
+        if (typeof merged.keyHealthCheckedAt !== "number") {
+          merged.keyHealthCheckedAt = null;
         }
         return merged;
       },

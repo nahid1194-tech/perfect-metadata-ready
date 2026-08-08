@@ -56,11 +56,35 @@ export type QueueItem = {
 
 export type ApiProvider = "gemini" | "openai" | "mistral";
 
+export type KeyHealthStatus =
+  | "working"
+  | "rate-limited"
+  | "quota-exhausted"
+  | "invalid-key"
+  | "permission-denied"
+  | "api-disabled"
+  | "model-unavailable"
+  | "server-error"
+  | "not-tested";
+
+export type KeyHealthCheck = {
+  status: KeyHealthStatus;
+  message: string;
+  httpStatus: number | null;
+  apiCode: string | null;
+  rawDetail: string;
+  model: string | null;
+  latencyMs: number | null;
+  checkedAt: number | null;
+  cooldownUntil: number | null;
+};
+
 export type ApiKeyEntry = {
   id: string;
   provider: ApiProvider;
   key: string;
   enabled: boolean;
+  health?: KeyHealthCheck;
 };
 
 export type Marketplace = "adobe" | "shutterstock";

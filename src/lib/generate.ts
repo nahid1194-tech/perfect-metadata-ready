@@ -26,7 +26,6 @@ import {
 } from "@/lib/background";
 import { imageContentHash } from "@/lib/cache";
 import { createProfiler, logProfile } from "@/lib/perf";
-import { waitForProviderSlot } from "@/lib/rate-limiter";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -341,7 +340,6 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
-  generationSpeed: "normal",
 };
 
 function hashString(input: string): number {
@@ -1006,7 +1004,6 @@ async function callGemini(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
-  await waitForProviderSlot("gemini", signal);
   let response: Response;
   try {
     response = await fetch(
@@ -1110,7 +1107,6 @@ async function callOpenAI(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
-  await waitForProviderSlot("openai", signal);
   let response: Response;
   try {
     const content: unknown[] = imageUrl
@@ -1211,7 +1207,6 @@ async function callMistral(
   temperature: number,
   signal?: AbortSignal
 ): Promise<string> {
-  await waitForProviderSlot("mistral", signal);
   let response: Response;
   try {
     const content: unknown[] = imageUrl

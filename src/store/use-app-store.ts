@@ -27,7 +27,6 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
-  generationSpeed: "normal",
 };
 
 type AppState = {

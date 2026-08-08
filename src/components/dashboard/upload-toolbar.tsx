@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Download,
   Loader2,
@@ -99,28 +99,11 @@ export function UploadToolbar() {
   const progress = useAppStore((state) => state.progress);
   const autoScroll = useAppStore((state) => state.autoScroll);
   const setAutoScroll = useAppStore((state) => state.setAutoScroll);
-  const { run, pause, resume, stop, generating, queueState, completed, total, etaSeconds } =
+  const { run, pause, resume, stop, generating, queueState, total, etaSeconds } =
     useGenerate();
 
-  const [liveRate, setLiveRate] = useState<number | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [scrolled, setScrolled] = useState(false);
-  const startedAtRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (generating) {
-      if (startedAtRef.current === null) startedAtRef.current = Date.now();
-      if (completed > 0) {
-        const elapsedMinutes = (Date.now() - startedAtRef.current) / 60000;
-        if (elapsedMinutes >= 1 / 12) {
-          setLiveRate(completed / elapsedMinutes);
-        }
-      }
-    } else {
-      startedAtRef.current = null;
-      setLiveRate(null);
-    }
-  }, [generating, completed]);
 
   useEffect(() => {
     if (!generating) {
@@ -375,12 +358,6 @@ export function UploadToolbar() {
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            <span className="font-medium text-foreground">Speed</span>{" "}
-            {liveRate !== null
-              ? `~${Math.round(liveRate)} images/min`
-              : "—"}
-          </span>
           <span>
             <span className="font-medium text-foreground">Elapsed</span>{" "}
             {generating ? formatDuration(elapsedSeconds) : "—"}

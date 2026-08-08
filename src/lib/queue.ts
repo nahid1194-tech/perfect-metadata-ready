@@ -33,13 +33,7 @@ import {
   modelListFor,
   refreshProviderModels,
 } from "@/lib/models";
-import {
-  currentSpeed,
-  keyRotationDelayMs,
-  providerSwitchDelayMs,
-  queueDelayMs,
-  retryDelayMs,
-} from "@/lib/rate-limiter";
+import { backoffDelayMs } from "@/lib/rate-limiter";
 import type {
   ApiProvider,
   GenerationResult,
@@ -56,6 +50,7 @@ const activeControllers = new Map<string, AbortController>();
 
 let preferredProvider: ApiProvider = "gemini";
 let recoveryProbeRunning = false;
+let backoffAttempt = 0;
 const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 
 function sleep(ms: number): Promise<void> {
@@ -169,32 +164,18 @@ function sleepCancellable(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function sleepBetweenImages(): Promise<void> {
-  const delayMs = queueDelayMs();
-  const chunk = 120;
-  let elapsed = 0;
-  while (elapsed < delayMs) {
-    if (stopRequested) return;
-    while (pauseRequested) {
-      if (stopRequested) return;
-      useAppStore.getState().setQueueState("paused");
-      await sleep(160);
-    }
-    useAppStore.getState().setQueueState("running");
-    await sleep(chunk);
-    elapsed += chunk;
-  }
-}
-
 async function waitForRateLimit(
   image: ImageAsset,
   error: RateLimitedError,
   controller: AbortController
 ): Promise<void> {
-  const seconds = Math.max(1, Math.round(error.delayMs / 1000));
-  const message = `API key rate-limited. Waiting ${seconds} seconds before retrying...`;
+  const delayMs = Math.max(backoffDelayMs(backoffAttempt), error.delayMs);
+  backoffAttempt++;
+  const endAt = Date.now() + delayMs;
+  const initialSeconds = Math.max(1, Math.ceil(delayMs / 1000));
+  const message = `All available API keys are temporarily rate-limited. Retrying automatically in ${initialSeconds}s...`;
   console.log(
-    `[Queue] All active API keys rate-limited, pausing for ${seconds}s`
+    `[Queue] All active API keys rate-limited, retrying automatically in ${initialSeconds}s`
   );
   updateDebug(
     null,
@@ -208,14 +189,27 @@ async function waitForRateLimit(
     error: null,
     statusMessage: message,
   });
-  useAppStore.getState().setQueueState("paused");
-  toast("info", "Rate limit reached", message);
-  await sleepCancellable(Math.max(error.delayMs, retryDelayMs()), controller.signal);
+
+  let lastShownSeconds = initialSeconds;
+  while (Date.now() < endAt) {
+    if (controller.signal.aborted) throw controller.signal.reason;
+    while (pauseRequested) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      await sleep(160);
+    }
+    const remaining = Math.max(1, Math.ceil((endAt - Date.now()) / 1000));
+    if (remaining !== lastShownSeconds) {
+      lastShownSeconds = remaining;
+      useAppStore.getState().patchQueueItem(image.id, {
+        statusMessage: `All available API keys are temporarily rate-limited. Retrying automatically in ${remaining}s...`,
+      });
+    }
+    await sleepCancellable(250, controller.signal);
+  }
   useAppStore.getState().patchQueueItem(image.id, {
     status: "analyzing",
     statusMessage: null,
   });
-  useAppStore.getState().setQueueState("running");
 }
 
 function rebaseCachedResult(
@@ -273,7 +267,6 @@ async function generateWithKeys(
       maskKey(key.key)
     );
 
-    let keyRateLimited = false;
     for (const model of models) {
       console.log(`[${provider}] Using model ${model}`);
       updateDebug(provider, keyIndex, keys.length, model, maskKey(key.key));
@@ -291,14 +284,16 @@ async function generateWithKeys(
           if (signal.aborted) throw error;
           if (isRateLimited(error)) {
             const until = Date.now() + rateLimitDelayMs(error);
-            keyRateLimited = true;
             sawRateLimit = true;
             waitUntil = Math.min(waitUntil, until);
+            markKeyRateLimited(key.id, until);
             console.log(
-              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), waiting ${retryDelayMs()}ms before retrying`
+              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), switching to the next active key`
             );
-            await sleepCancellable(retryDelayMs(), signal);
-            break;
+            if (keyIndex < orderedKeys.length - 1) {
+              notifyApiKeySwitch(provider, keyIndex + 1);
+            }
+            continue keyLoop;
           }
           if (isModelUnavailable(error)) {
             sawModelUnavailable = true;
@@ -310,31 +305,21 @@ async function generateWithKeys(
           }
           if (isNetworkError(error) && networkRetries < 2) {
             networkRetries++;
-            await sleep(retryDelayMs());
+            await sleepCancellable(1000, signal);
             continue;
           }
           if (isInvalidImageError(error)) throw error;
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
-            await sleepCancellable(keyRotationDelayMs(), signal);
-            notifyApiKeySwitch(provider, keyIndex + 1);
+            if (keyIndex < orderedKeys.length - 1) {
+              notifyApiKeySwitch(provider, keyIndex + 1);
+            }
             continue keyLoop;
           }
           nonRateLimitError ??= error;
           throw error;
         }
       }
-    }
-
-    if (keyRateLimited) {
-      markKeyRateLimited(key.id, waitUntil);
-      console.log(
-        `[${provider}] All models rate-limited for key ${maskKey(key.key)}, switching to the next active key`
-      );
-    }
-    if (keyIndex < orderedKeys.length - 1) {
-      await sleepCancellable(keyRotationDelayMs(), signal);
-      notifyApiKeySwitch(provider, keyIndex + 1);
     }
   }
 
@@ -394,7 +379,6 @@ async function generateWithProviders(
       lastError = error;
       if (index < order.length - 1) {
         const next = order[index + 1];
-        await sleepCancellable(providerSwitchDelayMs(), signal);
         preferredProvider = next;
         logProviderState(
           next,
@@ -556,6 +540,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   }
 
   clearInterval(ticker);
+  backoffAttempt = 0;
   useAppStore.getState().patchQueueItem(image.id, {
     status: "generating",
     progress: 96,
@@ -691,21 +676,12 @@ export async function runQueue(
       }
 
       await processTracked(items[i]);
-
-      if (hasApiKeys && i < items.length - 1) {
-        await sleepBetweenImages();
-      }
     }
   };
 
   await runSequential(targets);
 
   const cancelled = stopRequested;
-
-  if (!cancelled && currentSpeed() === "super-fast" && failed.length > 0) {
-    const retryTargets = targets.filter((image) => failed.includes(image.id));
-    await runSequential(retryTargets);
-  }
 
   active = false;
   stopRequested = false;

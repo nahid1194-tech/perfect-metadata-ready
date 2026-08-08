@@ -65,8 +65,6 @@ export type ApiKeyEntry = {
 
 export type Marketplace = "adobe" | "shutterstock";
 
-export type GenerationSpeed = "super-fast" | "fast" | "normal";
-
 export type GenerationSettings = {
   platform: Marketplace;
   titleLength: number;
@@ -80,5 +78,4 @@ export type GenerationSettings = {
   enableSuffix: boolean;
   enableNegativeTitleWords: boolean;
   enableNegativeKeywords: boolean;
-  generationSpeed: GenerationSpeed;
 };

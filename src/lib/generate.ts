@@ -556,6 +556,90 @@ function truncateWords(text: string, max: number): string {
   return out;
 }
 
+const TITLE_CONNECTOR_WORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "by",
+  "for",
+  "from",
+  "in",
+  "of",
+  "on",
+  "or",
+  "over",
+  "the",
+  "to",
+  "via",
+  "with",
+]);
+
+function fitTitle(title: string, maxChars: number): string {
+  let fitted = title.replace(/\s+/g, " ").trim();
+  if (fitted.length <= maxChars) {
+    return fitted.replace(/[,\-;:]\s*$/, "").trim();
+  }
+  const words = fitted.split(" ");
+  while (words.length > 1 && fitted.length > maxChars) {
+    words.pop();
+    fitted = words.join(" ");
+  }
+  while (
+    words.length > 1 &&
+    TITLE_CONNECTOR_WORDS.has(words[words.length - 1].replace(/[^a-zA-Z]/g, "").toLowerCase())
+  ) {
+    words.pop();
+    fitted = words.join(" ");
+  }
+  return fitted.replace(/[,\-;:]\s*$/, "").trim();
+}
+
+function categoryLabelWords(category: string): string[] {
+  const raw = category.trim();
+  if (!raw) return [];
+  if (/^\d+$/.test(raw)) {
+    const label = ADOBE_CATEGORIES.find((entry) => String(entry.id) === raw)?.label;
+    return label ? label.split(/\s+/) : [];
+  }
+  return raw.split(/[,\s]+/);
+}
+
+function buildKeywordPool(meta: StockMetadata): string[] {
+  return [
+    ...meta.keywords,
+    ...meta.title.split(/\s+/),
+    ...(meta.description ? meta.description.split(/\s+/) : []),
+    ...categoryLabelWords(meta.category),
+    ...conceptKeywords,
+  ];
+}
+
+function enforceKeywords(values: string[], pool: string[], target: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const clean = value.replace(/,/g, "").replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+    if (!clean || key.length < 3) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= target) break;
+  }
+  for (const value of pool) {
+    const clean = value.replace(/,/g, "").replace(/\s+/g, " ").trim();
+    const key = clean.toLowerCase();
+    if (!clean || key.length < 3) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= target) break;
+  }
+  return out.slice(0, target);
+}
+
 function applySettings(
   metadata: GeneratedMetadata,
   settings: GenerationSettings
@@ -569,22 +653,31 @@ function applySettings(
   const prefix = settings.enablePrefix ? settings.prefix.trim() : "";
   const suffix = settings.enableSuffix ? settings.suffix.trim() : "";
 
-  const clean = (meta: StockMetadata): { title: string; keywords: string[] } => {
-    let title = meta.title;
+  const cleanTitle = (title: string): string => {
+    let result = title;
     for (const term of negativeTitle) {
-      title = title.replace(new RegExp(`\\b${escapeRegExp(term)}\\b`, "gi"), " ");
+      result = result.replace(new RegExp(`\\b${escapeRegExp(term)}\\b`, "gi"), " ");
     }
-    title = title.replace(/\s+/g, " ").trim();
-    if (prefix) title = `${prefix} ${title}`;
-    if (suffix) title = `${title} ${suffix}`;
-    const keywords = meta.keywords.filter(
-      (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
-    );
-    return { title, keywords };
+    return result.replace(/\s+/g, " ").trim();
   };
 
-  const adobe = clean(metadata.adobe);
-  const shutterstock = clean(metadata.shutterstock);
+  const fitTitleWithAffixes = (body: string, maxChars: number): string => {
+    const bodyMax =
+      maxChars -
+      prefix.length -
+      suffix.length -
+      (prefix ? 1 : 0) -
+      (suffix ? 1 : 0);
+    const fitted = bodyMax > 0 ? fitTitle(body, bodyMax) : "";
+    const composed = [prefix, fitted, suffix].filter(Boolean).join(" ");
+    return composed.length <= maxChars ? composed : composed.slice(0, maxChars);
+  };
+
+  const adobeTitleMax = Math.min(settings.titleLength, ADOBE_TITLE_MAX);
+  const shutterstockTitleMax = Math.min(
+    settings.titleLength,
+    SHUTTERSTOCK_TITLE_MAX
+  );
   const adobeKeywordCount = Math.max(
     1,
     Math.min(settings.keywordCount, ADOBE_KEYWORDS_MAX)
@@ -594,21 +687,39 @@ function applySettings(
     Math.min(settings.keywordCount, SHUTTERSTOCK_KEYWORDS_MAX)
   );
 
+  const adobeKeywords = metadata.adobe.keywords.filter(
+    (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
+  );
+  const shutterstockKeywords = metadata.shutterstock.keywords.filter(
+    (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
+  );
+
   return {
     adobe: {
       ...metadata.adobe,
-      title: adobe.title.slice(0, ADOBE_TITLE_MAX),
+      title: fitTitleWithAffixes(cleanTitle(metadata.adobe.title), adobeTitleMax),
       description: truncateWords(metadata.adobe.description, settings.descriptionLength),
-      keywords: adobe.keywords.slice(0, adobeKeywordCount),
+      keywords: enforceKeywords(
+        adobeKeywords,
+        buildKeywordPool(metadata.adobe),
+        adobeKeywordCount
+      ),
     },
     shutterstock: {
       ...metadata.shutterstock,
-      title: shutterstock.title.slice(0, SHUTTERSTOCK_TITLE_MAX),
+      title: fitTitleWithAffixes(
+        cleanTitle(metadata.shutterstock.title),
+        shutterstockTitleMax
+      ),
       description: truncateWords(
         metadata.shutterstock.description,
         Math.min(settings.descriptionLength, SHUTTERSTOCK_TITLE_MAX)
       ),
-      keywords: shutterstock.keywords.slice(0, shutterstockKeywordCount),
+      keywords: enforceKeywords(
+        shutterstockKeywords,
+        buildKeywordPool(metadata.shutterstock),
+        shutterstockKeywordCount
+      ),
     },
   };
 }
@@ -841,14 +952,13 @@ Reply with ONLY this exact JSON (no markdown, no comments, no extra fields):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
 
 RULES
-- TITLE: specific, natural English; main subject + setting + key details; no filler or keyword stuffing.
-- KEYWORDS: 12-20 specific searchable terms, ordered by buyer intent (most searched first); prefer singular; no duplicates; drop generic filler (beautiful, background, concept, design, art, photo, image, high quality, etc.); never use brands, logos, trademarks, or artist names.
-- adobe.title: max 60 characters, no commas. adobe.category: the single numeric ID whose label best fits, from this list (ID Label): {ADOBE}
+- TITLE: specific, natural English; main subject + setting + key details; no filler or keyword stuffing. Must NEVER exceed the character limit from USER PREFERENCES and must ALWAYS end on a complete word. If the title is too long, rewrite it more concisely — never cut or truncate a word.
+- KEYWORDS: exactly the number specified in USER PREFERENCES (the count must match exactly). Complete, correctly spelled words or short phrases; prefer singular; no duplicates; no truncated words; drop generic filler (beautiful, background, concept, design, art, photo, image, high quality, etc.); never use brands, logos, trademarks, or artist names. Order by buyer intent (most searched first).
+- adobe.title: no commas. adobe.category: the single numeric ID whose label best fits, from this list (ID Label): {ADOBE}
 - shutterstock.description: 1-2 factual sentences (subject, setting, action, mood); no marketing language.
 - shutterstock.category: 1-2 exact official category names from this list: {SS}
-- adobe.keywords: up to 49. shutterstock.keywords: 7-50.
 - gender, ethnicity, age, and profession terms ONLY when clearly visible.
-- Before finalizing, self-check: does every keyword reflect visible content? does the title exactly match what is shown? remove anything weak or invented.`;
+- Before finalizing, self-check: is the keyword count exactly as requested? does every keyword reflect visible content? is the title within the character limit and ending on a complete word? fix anything that fails.`;
 
 function buildSingleShotPrompt(
   settings: GenerationSettings,
@@ -970,8 +1080,23 @@ async function runGenerationPipeline(args: {
 }
 
 function buildSettingsPrompt(settings: GenerationSettings): string {
+  const adobeTitleMax = Math.min(settings.titleLength, ADOBE_TITLE_MAX);
+  const shutterstockTitleMax = Math.min(
+    settings.titleLength,
+    SHUTTERSTOCK_TITLE_MAX
+  );
+  const adobeKeywordCount = Math.max(
+    1,
+    Math.min(settings.keywordCount, ADOBE_KEYWORDS_MAX)
+  );
+  const shutterstockKeywordCount = Math.max(
+    SHUTTERSTOCK_KEYWORDS_MIN,
+    Math.min(settings.keywordCount, SHUTTERSTOCK_KEYWORDS_MAX)
+  );
   const parts: string[] = [
-    `Target: ~${settings.titleLength} char title, ~${settings.descriptionLength} char description, ~${settings.keywordCount} keywords.`,
+    `Title length: exactly ${adobeTitleMax} characters or fewer for adobe.title and exactly ${shutterstockTitleMax} characters or fewer for shutterstock.title. Never exceed the limit and always end on a complete word; if too long, rewrite the title shorter.`,
+    `Keywords: adobe.keywords must contain EXACTLY ${adobeKeywordCount} unique keywords and shutterstock.keywords must contain EXACTLY ${shutterstockKeywordCount} unique keywords.`,
+    `Description: up to ${settings.descriptionLength} characters.`,
   ];
   if (settings.enablePrefix && settings.prefix.trim()) {
     parts.push(`Prefix every title with: "${settings.prefix.trim()}"`);

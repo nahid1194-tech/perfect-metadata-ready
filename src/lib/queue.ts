@@ -34,6 +34,7 @@ import {
   refreshProviderModels,
 } from "@/lib/models";
 import { backoffDelayMs } from "@/lib/rate-limiter";
+import { autoPushAfterGeneration } from "@/lib/git-sync";
 import type {
   ApiProvider,
   GenerationResult,
@@ -718,6 +719,7 @@ export async function runQueue(
     );
     if (success > 0) {
       setTimeout(() => useAppStore.getState().openSuccess(), 400);
+      void autoPushAfterGeneration();
     }
   } else if (success > 0) {
     toast(

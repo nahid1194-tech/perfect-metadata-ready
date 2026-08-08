@@ -7,6 +7,8 @@ import type {
   ApiProvider,
   GenerationResult,
   GenerationSettings,
+  GitPushStatus,
+  GitSyncConfig,
   ImageAsset,
   QueueItem,
   QueueState,
@@ -18,7 +20,7 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
   platform: "adobe",
   titleLength: 60,
   descriptionLength: 300,
-  keywordCount: 20,
+  keywordCount: 49,
   prefix: "",
   suffix: "",
   negativeTitleWords: "",
@@ -27,6 +29,24 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
+};
+
+export const DEFAULT_GIT_CONFIG: GitSyncConfig = {
+  enabled: false,
+  autoPush: false,
+  repoUrl: "",
+  branch: "main",
+  token: "",
+  commitMessage: "Auto-update: Generated SEO metadata for images",
+  outputDir: "output",
+};
+
+const DEFAULT_GIT_PUSH_STATUS: GitPushStatus = {
+  state: "idle",
+  message: null,
+  commitHash: null,
+  branch: null,
+  lastPushedAt: null,
 };
 
 type AppState = {
@@ -114,6 +134,10 @@ type AppState = {
       fallbackActive: boolean;
     }>
   ) => void;
+  gitConfig: GitSyncConfig;
+  setGitConfig: (patch: Partial<GitSyncConfig>) => void;
+  gitPushStatus: GitPushStatus;
+  setGitPushStatus: (patch: Partial<GitPushStatus>) => void;
 };
 
 export const useAppStore = create<AppState>()(
@@ -144,6 +168,8 @@ export const useAppStore = create<AppState>()(
       errorOpen: false,
       failedImageIds: [],
       settings: DEFAULT_SETTINGS,
+      gitConfig: DEFAULT_GIT_CONFIG,
+      gitPushStatus: DEFAULT_GIT_PUSH_STATUS,
       setTheme: (theme) => set({ theme }),
       setApiKeys: (apiKeys) => set({ apiKeys }),
       addApiKey: (entry) =>
@@ -169,6 +195,10 @@ export const useAppStore = create<AppState>()(
         })),
       setSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
+      setGitConfig: (patch) =>
+        set((state) => ({ gitConfig: { ...state.gitConfig, ...patch } })),
+      setGitPushStatus: (patch) =>
+        set((state) => ({ gitPushStatus: { ...state.gitPushStatus, ...patch } })),
       addImages: (images) =>
         set((state) => ({ images: [...state.images, ...images] })),
       updateImage: (id, patch) =>
@@ -316,6 +346,7 @@ export const useAppStore = create<AppState>()(
         settings: state.settings,
         resultCache: state.resultCache,
         autoScroll: state.autoScroll,
+        gitConfig: state.gitConfig,
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as (Partial<AppState> & {
@@ -402,6 +433,14 @@ export const useAppStore = create<AppState>()(
           Array.isArray(merged.resultCache)
         ) {
           merged.resultCache = {};
+        }
+        if (merged.gitConfig && typeof merged.gitConfig === "object") {
+          merged.gitConfig = {
+            ...DEFAULT_GIT_CONFIG,
+            ...merged.gitConfig,
+          };
+        } else {
+          merged.gitConfig = { ...DEFAULT_GIT_CONFIG };
         }
         return merged;
       },

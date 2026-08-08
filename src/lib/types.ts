@@ -79,3 +79,37 @@ export type GenerationSettings = {
   enableNegativeTitleWords: boolean;
   enableNegativeKeywords: boolean;
 };
+
+export type GitSyncConfig = {
+  enabled: boolean;
+  autoPush: boolean;
+  repoUrl: string;
+  branch: string;
+  token: string;
+  commitMessage: string;
+  outputDir: string;
+};
+
+export type GitPushState = "idle" | "pushing" | "success" | "error";
+
+export type GitPushStatus = {
+  state: GitPushState;
+  message: string | null;
+  commitHash: string | null;
+  branch: string | null;
+  lastPushedAt: number | null;
+};
+
+export type GitPushResult = {
+  ok: boolean;
+  changed: boolean;
+  message: string;
+  commitHash?: string;
+  branch?: string;
+  code?: string;
+};
+
+export type GitPushFile = {
+  path: string;
+  content: string;
+};

@@ -6,6 +6,7 @@ import { Menu, X } from "lucide-react"
 
 import { ensureModelCache } from "@/lib/models"
 import { ControlCard } from "@/components/dashboard/control-card"
+import { GitSyncSettings } from "@/components/dashboard/git-sync-settings"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
 import { NotificationCard } from "@/components/dashboard/notification-card"
@@ -57,6 +58,8 @@ export function DashboardShell() {
       <ControlCard />
       <div className="my-6 h-px bg-border" />
       <MetadataSettings />
+      <div className="my-6 h-px bg-border" />
+      <GitSyncSettings />
     </>
   );
 

@@ -953,7 +953,9 @@ Reply with ONLY this exact JSON (no markdown, no comments, no extra fields):
 
 TITLE
 - Natural, specific, professional English. NEVER a comma-separated list of keywords and NEVER keyword-stuffed.
-- Structure when appropriate: [Main Subject] + [Action/Context] + [Style/Design Type] + [Color/Composition].
+- Structure when appropriate: [Main Subject] + [Action/Context] + [Style/Design Type] + [Color/Composition] + [Utility/Use Case].
+- Focus on the subject, style, and utility (e.g. "for branding", "for web design", "for social media") so buyers understand what the asset is and how to use it.
+- Keep titles concise and under 70 characters (Adobe Stock limit), descriptive, and SEO-friendly.
 - Put the primary subject and primary concept in the FIRST 4-7 words whenever possible.
 - Examples:
   BAD: "Vector icon, agriculture, plant, leaf, green, logo design"
@@ -965,11 +967,13 @@ TITLE
 - adobe.title: no commas.
 
 KEYWORDS
-- Provide EXACTLY the count specified in USER PREFERENCES for BOTH adobe.keywords and shutterstock.keywords.
+- Provide EXACTLY the count specified in USER PREFERENCES for BOTH adobe.keywords and shutterstock.keywords (Adobe Stock allows up to 49 keywords, Shutterstock up to 50).
 - RELEVANCE AND ACCURACY COME FIRST: never add an irrelevant term just to reach the count; instead find genuinely specific, useful terms (subject details, actions, important objects, style, medium, colors, composition, background, context, commercial concepts).
-- Order strictly by search importance: the FIRST 5-10 keywords must be the strongest, most searchable terms a buyer would type (primary subject first, then action/context, important objects, style/medium, main concepts, secondary concepts, color, composition/background, commercial concepts). Do NOT shuffle them randomly.
+- Build a BALANCED mix of three types: (1) primary subject keywords, (2) descriptive long-tail phrases such as "minimalist flat vector illustration" or "transparent background PNG", and (3) technical/style terms such as "vector", "icon", "isolated", "template", "minimalist", "flat design", "hand-drawn", "line art", "PNG".
+- Use high-intent identifiers ONLY when they accurately describe the asset: "vector", "isolated", "template", "minimalist", "white background", "transparent background", "PNG", "icon", "logo", "banner", "background", "web design", "branding".
+- Order strictly by search importance: the FIRST 5-10 keywords must be the strongest, most searchable high-intent terms a buyer would type (primary subject first, then action/context, important objects, style/medium, main concepts, secondary concepts, color, composition/background, commercial concepts). Do NOT shuffle them randomly.
 - Complete, correctly spelled words or short phrases; prefer singular where natural; no duplicates or near-duplicates; no truncated words.
-- Drop generic filler (beautiful, photo, image, high quality, background, concept, design...) UNLESS the VERIFIED BACKGROUND FACTS explicitly require a specific background term such as "white background", "black background", or "transparent background".
+- Drop generic filler (beautiful, photo, image, high quality, concept, design...) UNLESS the VERIFIED BACKGROUND FACTS explicitly require a specific background term such as "white background", "black background", or "transparent background".
 - Never use brands, logos, trademarks, artist names, or unrelated trending terms.
 
 CONSISTENCY
@@ -988,7 +992,9 @@ OTHER
 
 FINAL SELF-CHECK before outputting:
 - Does the title accurately describe the image, stay within the character limit, end on a complete word, and read naturally (not a keyword list)?
-- Are the first 5-10 keywords the strongest and most searchable?
+- Are the first 5-10 keywords the strongest and most searchable high-intent terms?
+- Is there a balanced mix of primary keywords, long-tail phrases, and technical/style terms (no keyword stuffing)?
+- Are high-intent identifiers like "vector", "isolated", "template", "minimalist", or "transparent background" included ONLY when accurate?
 - Is the keyword count exactly as requested, with no duplicates, no truncated words, and nothing irrelevant?
 - Is the background stated correctly and is the category correct?
 - Did you invent anything? Would a real buyer searching for this exact asset find these terms useful?

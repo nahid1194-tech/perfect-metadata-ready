@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Download, RotateCcw, Trash2, WandSparkles } from "lucide-react"
+import { Download, Loader2, RotateCcw, Trash2, UploadCloud, WandSparkles } from "lucide-react"
 
 import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
+import { pushToGitHub } from "@/lib/git-sync"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
 import { validateMetadata, validateResults } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
@@ -46,9 +47,12 @@ export function UploadToolbar() {
   const failedImageIds = useAppStore((state) => state.failedImageIds);
   const platform = useAppStore((state) => state.settings.platform);
   const progress = useAppStore((state) => state.progress);
+  const gitEnabled = useAppStore((state) => state.gitConfig.enabled);
+  const gitPushStatus = useAppStore((state) => state.gitPushStatus);
   const { run, stop, generating } = useGenerate();
 
   const [scrolled, setScrolled] = useState(false);
+  const [pushing, setPushing] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -166,6 +170,24 @@ export function UploadToolbar() {
     }
   };
 
+  const handlePush = async () => {
+    if (results.length === 0) {
+      toast("error", "Nothing to push", "Generate metadata first.");
+      return;
+    }
+    setPushing(true);
+    try {
+      const result = await pushToGitHub();
+      toast(
+        result.ok ? "success" : "error",
+        result.ok ? "Pushed to GitHub" : "Git push failed",
+        result.message
+      );
+    } finally {
+      setPushing(false);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -208,6 +230,20 @@ export function UploadToolbar() {
           >
             <Download />
             Export CSV
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={results.length === 0 || !gitEnabled || pushing || gitPushStatus.state === "pushing"}
+            onClick={handlePush}
+          >
+            {pushing || gitPushStatus.state === "pushing" ? (
+              <Loader2 className="animate-spin" />
+            ) : (
+              <UploadCloud />
+            )}
+            Push to GitHub
           </Button>
 
           <Button size="sm" disabled={images.length === 0} onClick={handleGenerate}>

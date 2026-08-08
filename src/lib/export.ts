@@ -236,30 +236,43 @@ function shutterstockRows(
   });
 }
 
+export async function buildAdobeCsv(
+  results: GenerationResult[],
+  releases = "No"
+): Promise<string> {
+  assertRowLimit(results);
+  const filenames = resolveExportFilenames(results, "adobe");
+  const Papa = await getPapa();
+  return Papa.unparse({
+    fields: ADOBE_FIELDS,
+    data: adobeRows(results, releases, filenames),
+  });
+}
+
+export async function buildShutterstockCsv(
+  results: GenerationResult[]
+): Promise<string> {
+  assertRowLimit(results);
+  const filenames = resolveExportFilenames(results, "shutterstock");
+  const Papa = await getPapa();
+  return Papa.unparse({
+    fields: SHUTTERSTOCK_FIELDS,
+    data: shutterstockRows(results, filenames),
+  });
+}
+
 export async function exportAdobeCsv(
   results: GenerationResult[],
   releases = "No"
 ): Promise<void> {
-  assertRowLimit(results);
-  const filenames = resolveExportFilenames(results, "adobe");
-  const Papa = await getPapa();
-  const csv = Papa.unparse({
-    fields: ADOBE_FIELDS,
-    data: adobeRows(results, releases, filenames),
-  });
+  const csv = await buildAdobeCsv(results, releases);
   downloadBlob(encodeCsv(csv), `adobe-stock-${dateStamp()}.csv`);
 }
 
 export async function exportShutterstockCsv(
   results: GenerationResult[]
 ): Promise<void> {
-  assertRowLimit(results);
-  const filenames = resolveExportFilenames(results, "shutterstock");
-  const Papa = await getPapa();
-  const csv = Papa.unparse({
-    fields: SHUTTERSTOCK_FIELDS,
-    data: shutterstockRows(results, filenames),
-  });
+  const csv = await buildShutterstockCsv(results);
   downloadBlob(encodeCsv(csv), `shutterstock-${dateStamp()}.csv`);
 }
 

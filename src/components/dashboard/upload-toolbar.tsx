@@ -1,48 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import {
-  Download,
-  Loader2,
-  Pause,
-  Play,
-  RotateCcw,
-  Square,
-  Trash2,
-  WandSparkles,
-} from "lucide-react"
+import { Download, RotateCcw, Trash2, WandSparkles } from "lucide-react"
 
 import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
-import type { ApiProvider, GenerationStatus } from "@/lib/types"
 import { validateMetadata, validateResults } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { Switch } from "@/components/ui/switch"
 import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 import { cn } from "@/lib/utils"
-
-const PROVIDER_LABEL: Record<ApiProvider, string> = {
-  gemini: "Gemini",
-  openai: "OpenAI",
-  mistral: "Mistral AI",
-};
-
-const STATUS_LABEL: Partial<Record<GenerationStatus, string>> = {
-  uploading: "Uploading image…",
-  waiting: "Waiting in queue…",
-  analyzing: "Analyzing image…",
-  generating: "Generating Metadata…",
-  retrying: "Retrying…",
-};
-
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
 
 function StatTile({
   label,
@@ -70,50 +39,16 @@ function StatTile({
   );
 }
 
-function CurrentRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          "min-w-0 truncate text-right text-xs font-medium text-foreground",
-          mono && "font-mono tabular-nums"
-        )}
-        title={value}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
 export function UploadToolbar() {
   const images = useAppStore((state) => state.images);
   const selectedIds = useAppStore((state) => state.selectedIds);
   const results = useAppStore((state) => state.results);
   const failedImageIds = useAppStore((state) => state.failedImageIds);
   const platform = useAppStore((state) => state.settings.platform);
-  const activeImageId = useAppStore((state) => state.activeImageId);
-  const debugStatus = useAppStore((state) => state.debugStatus);
-  const queueItems = useAppStore((state) => state.queueItems);
   const progress = useAppStore((state) => state.progress);
-  const autoScroll = useAppStore((state) => state.autoScroll);
-  const setAutoScroll = useAppStore((state) => state.setAutoScroll);
-  const { run, pause, resume, stop, generating, queueState, total, etaSeconds } =
-    useGenerate();
+  const { run, stop, generating } = useGenerate();
 
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    if (!generating) {
-      setElapsedSeconds(0);
-      return;
-    }
-    setElapsedSeconds(0);
-    const id = setInterval(() => setElapsedSeconds((seconds) => seconds + 1), 1000);
-    return () => clearInterval(id);
-  }, [generating]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -121,6 +56,8 @@ export function UploadToolbar() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  if (generating) return null;
 
   const partialSelection =
     selectedIds.length > 0 && selectedIds.length < images.length;
@@ -130,25 +67,13 @@ export function UploadToolbar() {
 
   const uploaded = images.length;
   const completedCount = Math.min(uploaded, results.length);
-  const generatingCount = generating ? 1 : 0;
   const failedCount = failedImageIds.length;
   const remainingCount = Math.max(
     0,
-    uploaded - completedCount - generatingCount - failedCount
+    uploaded - completedCount - failedCount
   );
-  const progressPct = generating
-    ? Math.round(progress)
-    : uploaded > 0
-      ? Math.round((results.length / uploaded) * 100)
-      : 0;
-
-  const activeImage = images.find((image) => image.id === activeImageId);
-  const activeItem = activeImageId ? queueItems[activeImageId] : undefined;
-  const activeProvider = generating ? debugStatus.activeProvider : null;
-  const activeStatus =
-    activeItem?.statusMessage ??
-    (activeItem ? STATUS_LABEL[activeItem.status] : undefined) ??
-    "Generating Metadata…";
+  const progressPct =
+    uploaded > 0 ? Math.round((results.length / uploaded) * 100) : 0;
 
   const handleGenerate = () => {
     if (images.length === 0) {
@@ -163,10 +88,11 @@ export function UploadToolbar() {
     run({ retryFailed: true });
   };
 
-  const handleClearCompleted = () => {
-    if (results.length === 0) return;
-    useAppStore.getState().clearResults();
-    toast("info", "Results cleared", "Completed results removed.");
+  const handleClearAll = () => {
+    if (images.length === 0 && results.length === 0) return;
+    if (generating) stop();
+    useAppStore.getState().clearAll();
+    toast("info", "Cleared", "All images and results removed.");
   };
 
   const handleExport = async () => {
@@ -252,35 +178,12 @@ export function UploadToolbar() {
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="min-w-0 truncate text-sm font-semibold">
-          {generating
-            ? "Generation in progress"
-            : results.length > 0
-              ? `Ready · ${results.length} result${results.length === 1 ? "" : "s"}`
-              : `Ready · ${images.length} file${images.length === 1 ? "" : "s"}`}
+          {results.length > 0
+            ? `Ready · ${results.length} result${results.length === 1 ? "" : "s"}`
+            : `Ready · ${images.length} file${images.length === 1 ? "" : "s"}`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          {generating ? (
-            <>
-              {queueState === "running" && total > 0 ? (
-                <Button variant="outline" size="sm" onClick={pause}>
-                  <Pause />
-                  Pause
-                </Button>
-              ) : null}
-              {queueState === "paused" ? (
-                <Button variant="outline" size="sm" onClick={resume}>
-                  <Play />
-                  Resume
-                </Button>
-              ) : null}
-              <Button variant="destructive" size="sm" onClick={stop}>
-                <Square />
-                Stop
-              </Button>
-            </>
-          ) : null}
-
-          {!generating && failedImageIds.length > 0 ? (
+          {failedImageIds.length > 0 ? (
             <Button variant="outline" size="sm" onClick={handleRetry}>
               <RotateCcw />
               Retry ({failedImageIds.length})
@@ -290,91 +193,39 @@ export function UploadToolbar() {
           <Button
             variant="ghost"
             size="sm"
-            disabled={results.length === 0 || generating}
-            onClick={handleClearCompleted}
+            disabled={images.length === 0 && results.length === 0}
+            onClick={handleClearAll}
           >
             <Trash2 />
-            Clear Completed
+            Clear All
           </Button>
 
           <Button
             variant="outline"
             size="sm"
-            disabled={results.length === 0 || generating}
+            disabled={results.length === 0}
             onClick={handleExport}
           >
             <Download />
             Export CSV
           </Button>
 
-          <Button size="sm" disabled={images.length === 0 || generating} onClick={handleGenerate}>
+          <Button size="sm" disabled={images.length === 0} onClick={handleGenerate}>
             <WandSparkles />
             {generateLabel}
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
         <StatTile label="Uploaded" value={uploaded} />
         <StatTile label="Completed" value={completedCount} accent />
-        <StatTile label="Generating" value={generatingCount} accent />
         <StatTile label="Failed" value={failedCount} />
         <StatTile label="Remaining" value={remainingCount} />
         <StatTile label="Progress" value={`${Math.min(100, progressPct)}%`} />
       </div>
 
-      {generating ? (
-        <div className="flex flex-col gap-2 rounded-xl border bg-background/70 p-3">
-          <div className="flex items-center gap-2">
-            <Loader2 className="size-3.5 animate-spin text-primary" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Current Processing
-            </span>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <CurrentRow label="Image" value={activeImage?.name ?? "—"} />
-            <CurrentRow
-              label="API"
-              value={activeProvider ? PROVIDER_LABEL[activeProvider] : "—"}
-            />
-            <CurrentRow
-              label="Model"
-              value={debugStatus.activeModel ?? "—"}
-              mono
-            />
-            <CurrentRow
-              label="Provider Key"
-              value={
-                debugStatus.activeKeyCount && debugStatus.activeKeyCount > 0
-                  ? `${(debugStatus.activeKeyIndex ?? 0) + 1} / ${debugStatus.activeKeyCount}`
-                  : "—"
-              }
-              mono
-            />
-            <CurrentRow label="Status" value={activeStatus} />
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            <span className="font-medium text-foreground">Elapsed</span>{" "}
-            {generating ? formatDuration(elapsedSeconds) : "—"}
-          </span>
-          <span>
-            <span className="font-medium text-foreground">ETA</span>{" "}
-            {generating && etaSeconds !== null ? `~${etaSeconds}s left` : "—"}
-          </span>
-        </div>
-
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-          <Switch checked={autoScroll} onCheckedChange={setAutoScroll} aria-label="Auto scroll to current image" />
-          Auto Scroll to Current Image
-        </label>
-      </div>
-
-      {generating || progress > 0 ? (
+      {progress > 0 ? (
         <Progress
           value={Math.min(100, progressPct)}
           className="h-1.5"

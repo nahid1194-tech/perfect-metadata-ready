@@ -91,6 +91,7 @@ type AppState = {
   updateResult: (id: string, updater: (result: GenerationResult) => GenerationResult) => void;
   removeResult: (id: string) => void;
   clearResults: () => void;
+  clearAll: () => void;
   resultCache: Record<string, GenerationResult>;
   setResultCache: (key: string, result: GenerationResult) => void;
   debugStatus: {
@@ -258,6 +259,24 @@ export const useAppStore = create<AppState>()(
             if (item.status === "completed") delete queueItems[id];
           }
           return { results: [], queueItems };
+        }),
+      clearAll: () =>
+        set({
+          images: [],
+          selectedIds: [],
+          results: [],
+          generating: false,
+          progress: 0,
+          activeImageId: null,
+          queueItems: {},
+          queueState: "idle",
+          batchTotal: 0,
+          batchCompleted: 0,
+          etaSeconds: null,
+          successOpen: false,
+          errorOpen: false,
+          failedImageIds: [],
+          resultCache: {},
         }),
       resultCache: {},
       setResultCache: (key, result) =>

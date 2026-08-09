@@ -24,14 +24,14 @@ function StatTile({
   accent?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-xl border bg-background/70 px-2.5 py-2">
-      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    <div className="flex flex-col gap-0.5 rounded-xl border border-white/10 bg-white/10 px-2.5 py-2">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-blue-200/70">
         {label}
       </span>
       <span
         className={cn(
           "text-base font-semibold tabular-nums",
-          accent ? "text-primary" : "text-foreground"
+          accent ? "text-sky-300" : "text-white"
         )}
       >
         {value}
@@ -60,8 +60,6 @@ export function UploadToolbar() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
-  if (generating) return null;
 
   const partialSelection =
     selectedIds.length > 0 && selectedIds.length < images.length;
@@ -191,22 +189,27 @@ export function UploadToolbar() {
   return (
     <div
       className={cn(
-        "sticky top-3 z-50 flex flex-col gap-3 rounded-[20px] border p-4 backdrop-blur-md transition-[box-shadow,background-color,border-color] duration-300",
-        "bg-[#FCFCFA]/90 dark:bg-card/90",
+        "sticky top-16 z-30 flex flex-col gap-3 rounded-[20px] border p-4 transition-[box-shadow,background-color,border-color] duration-300 lg:top-3",
+        "border-white/10 bg-[#0B1F3A] text-white",
         scrolled
-          ? "shadow-[0_16px_48px_-12px_rgba(0,0,0,0.28)]"
-          : "shadow-[0_4px_24px_-8px_rgba(0,0,0,0.12)]"
+          ? "shadow-[0_16px_48px_-12px_rgba(0,0,0,0.4)]"
+          : "shadow-[0_4px_24px_-8px_rgba(0,0,0,0.25)]"
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="min-w-0 truncate text-sm font-semibold">
+        <p className="min-w-0 truncate text-sm font-semibold text-white">
           {results.length > 0
             ? `Ready · ${results.length} result${results.length === 1 ? "" : "s"}`
             : `Ready · ${images.length} file${images.length === 1 ? "" : "s"}`}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {failedImageIds.length > 0 ? (
-            <Button variant="outline" size="sm" onClick={handleRetry}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+              onClick={handleRetry}
+            >
               <RotateCcw />
               Retry ({failedImageIds.length})
             </Button>
@@ -215,6 +218,7 @@ export function UploadToolbar() {
           <Button
             variant="ghost"
             size="sm"
+            className="text-white/85 hover:bg-white/10 hover:text-white"
             disabled={images.length === 0 && results.length === 0}
             onClick={handleClearAll}
           >
@@ -225,6 +229,7 @@ export function UploadToolbar() {
           <Button
             variant="outline"
             size="sm"
+            className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
             disabled={results.length === 0}
             onClick={handleExport}
           >
@@ -235,6 +240,7 @@ export function UploadToolbar() {
           <Button
             variant="outline"
             size="sm"
+            className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
             disabled={results.length === 0 || !gitEnabled || pushing || gitPushStatus.state === "pushing"}
             onClick={handlePush}
           >
@@ -246,7 +252,12 @@ export function UploadToolbar() {
             Push to GitHub
           </Button>
 
-          <Button size="sm" disabled={images.length === 0} onClick={handleGenerate}>
+          <Button
+            size="sm"
+            className="bg-sky-400 text-sky-950 hover:bg-sky-300"
+            disabled={images.length === 0 || generating}
+            onClick={handleGenerate}
+          >
             <WandSparkles />
             {generateLabel}
           </Button>
@@ -264,8 +275,8 @@ export function UploadToolbar() {
       {progress > 0 ? (
         <Progress
           value={Math.min(100, progressPct)}
-          className="h-1.5"
-          indicatorClassName="bg-gradient-to-r from-primary to-primary/70"
+          className="h-1.5 bg-white/15"
+          indicatorClassName="bg-gradient-to-r from-sky-400 to-blue-600"
         />
       ) : null}
     </div>

@@ -593,8 +593,8 @@ function ProviderKeys({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold tracking-tight">{title}</p>
           <Badge variant="secondary" className="text-xs">
             {providerKeys.length} API{" "}
@@ -611,7 +611,7 @@ function ProviderKeys({
           ) : null}
         </div>
         {providerKeys.length > 0 ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="outline"
@@ -723,26 +723,12 @@ function ProviderKeys({
                     <KeyRound className="size-4 shrink-0 text-muted-foreground" />
                     <span
                       className={cn(
-                        "flex-1 truncate font-mono text-xs",
+                        "min-w-0 flex-1 truncate font-mono text-xs",
                         !entry.enabled && "text-muted-foreground line-through"
                       )}
                     >
                       {maskKeyBullets(entry.key)}
                     </span>
-                    <KeyHealthBadge
-                      status={health?.status ?? "not-tested"}
-                      testing={isTesting}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={isTesting || testingAll}
-                      onClick={() => testSingleKey(entry)}
-                      aria-label={`Test API key ${maskKey(entry.key)}`}
-                    >
-                      <Activity className="size-4" />
-                    </Button>
                     <Switch
                       checked={entry.enabled}
                       onCheckedChange={(checked) =>
@@ -750,24 +736,42 @@ function ProviderKeys({
                       }
                       aria-label={`Toggle API key ${maskKey(entry.key)}`}
                     />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => startEdit(entry.id)}
-                      aria-label={`Edit API key ${maskKey(entry.key)}`}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeApiKey(entry.id)}
-                      aria-label={`Delete API key ${maskKey(entry.key)}`}
-                    >
-                      <Trash2 />
-                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <KeyHealthBadge
+                      status={health?.status ?? "not-tested"}
+                      testing={isTesting}
+                    />
+                    <div className="ml-auto flex items-center gap-0.5">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={isTesting || testingAll}
+                        onClick={() => testSingleKey(entry)}
+                        aria-label={`Test API key ${maskKey(entry.key)}`}
+                      >
+                        <Activity className="size-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => startEdit(entry.id)}
+                        aria-label={`Edit API key ${maskKey(entry.key)}`}
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeApiKey(entry.id)}
+                        aria-label={`Delete API key ${maskKey(entry.key)}`}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </div>
                   {health ? <KeyHealthDetails entry={entry} /> : null}
                   <KeyModelHealth entry={entry} />

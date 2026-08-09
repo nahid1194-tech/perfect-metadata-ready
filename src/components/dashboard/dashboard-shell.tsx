@@ -65,7 +65,7 @@ export function DashboardShell() {
 
   return (
     <div className="min-h-screen bg-background">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[360px] flex-col overflow-y-auto border-r bg-sidebar px-5 py-6 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[320px] flex-col overflow-y-auto border-r bg-sidebar px-5 py-6 lg:flex xl:w-[360px]">
         {settings}
       </aside>
 
@@ -115,7 +115,7 @@ export function DashboardShell() {
         ) : null}
       </AnimatePresence>
 
-      <div className="lg:pl-[360px]">
+      <div className="lg:pl-[320px] xl:pl-[360px]">
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
           <NotificationCard />
 

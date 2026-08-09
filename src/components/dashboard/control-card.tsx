@@ -20,9 +20,9 @@ const PROVIDER_LABEL: Record<ApiProvider, string> = {
 
 function Diag({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-semibold text-foreground">{value}</span>
+    <div className="flex min-w-0 items-center justify-between gap-2">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate font-semibold text-foreground">{value}</span>
     </div>
   );
 }
@@ -89,7 +89,7 @@ export function ControlCard() {
       <Badge
         variant={activeKeyCount > 0 ? "secondary" : "outline"}
         className={cn(
-          "w-fit gap-1",
+          "max-w-full gap-1 truncate",
           activeKeyCount > 0 &&
             "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
         )}
@@ -101,7 +101,7 @@ export function ControlCard() {
       </Badge>
 
       {generating && providerLabel ? (
-        <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-mono text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">API: {providerLabel}</span>
           <span aria-hidden="true">·</span>
           <span>Model: {activeModel}</span>

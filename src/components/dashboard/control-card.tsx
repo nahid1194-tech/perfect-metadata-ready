@@ -34,6 +34,8 @@ export function ControlCard() {
   const debugStatus = useAppStore((state) => state.debugStatus);
   const batchCompleted = useAppStore((state) => state.batchCompleted);
   const batchTotal = useAppStore((state) => state.batchTotal);
+  const activeImageId = useAppStore((state) => state.activeImageId);
+  const queueItems = useAppStore((state) => state.queueItems);
   const [keysOpen, setKeysOpen] = useState(false);
   const geminiKeyCount = apiKeys.filter(
     (entry) =>
@@ -61,6 +63,16 @@ export function ControlCard() {
   const activeModel =
     debugStatus.activeModel ??
     bestModelFor(debugStatus.activeProvider ?? primaryProvider);
+  const activeQueueItem = activeImageId ? queueItems[activeImageId] : null;
+  const activeStatus =
+    activeQueueItem?.statusMessage ??
+    (activeQueueItem?.status === "generating"
+      ? "Generating metadata…"
+      : activeQueueItem?.status === "retrying"
+        ? "Retrying…"
+        : activeQueueItem?.status
+          ? "Analyzing image…"
+          : null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -90,10 +102,12 @@ export function ControlCard() {
 
       {generating && providerLabel ? (
         <p className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-          <span className="font-semibold text-foreground">{providerLabel}</span>
+          <span className="font-semibold text-foreground">API: {providerLabel}</span>
+          <span aria-hidden="true">·</span>
+          <span>Model: {activeModel}</span>
           <span aria-hidden="true">·</span>
           <span>
-            Key {debugStatus.activeKeyIndex != null ? debugStatus.activeKeyIndex + 1 : "–"}/
+            Key: {debugStatus.activeKeyIndex != null ? debugStatus.activeKeyIndex + 1 : "–"}/
             {debugStatus.activeKeyCount || "–"}
           </span>
           {debugStatus.activeKeyMasked ? (
@@ -102,8 +116,12 @@ export function ControlCard() {
               <span>{debugStatus.activeKeyMasked}</span>
             </>
           ) : null}
-          <span aria-hidden="true">·</span>
-          <span>Model: {activeModel}</span>
+          {activeStatus ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>Status: {activeStatus}</span>
+            </>
+          ) : null}
         </p>
       ) : null}
 

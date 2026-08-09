@@ -1,6 +1,6 @@
 import { activeKeys } from "@/lib/api-keys";
 import { FALLBACK_MODELS } from "@/lib/model-catalog";
-import type { ApiProvider } from "@/lib/types";
+import type { ApiKeyEntry, ApiProvider } from "@/lib/types";
 import { useAppStore } from "@/store/use-app-store";
 
 export { FALLBACK_MODELS };
@@ -13,7 +13,11 @@ const MISTRAL_API_BASE = "https://api.mistral.ai/v1";
 
 type GeminiModelEntry = {
   name?: string;
+  displayName?: string;
   supportedGenerationMethods?: string[];
+  supportedActions?: string[];
+  version?: string;
+  description?: string;
 };
 
 const GEMINI_BLOCKLIST =
@@ -23,18 +27,27 @@ function isGeminiVisionModel(entry: GeminiModelEntry): boolean {
   const name = entry.name?.replace(/^models\//, "") ?? "";
   if (!/^gemini-\d/.test(name)) return false;
   if (GEMINI_BLOCKLIST.test(name)) return false;
-  const methods = entry.supportedGenerationMethods;
-  if (methods && methods.length > 0 && !methods.includes("generateContent")) {
+  const methods =
+    entry.supportedGenerationMethods ?? entry.supportedActions ?? [];
+  if (methods.length > 0 && !methods.includes("generateContent")) {
     return false;
   }
   return true;
 }
 
-function geminiPriority(id: string): number {
-  if (id.includes("2.5")) return id.includes("pro") ? 1 : 2;
-  if (id.includes("2.0")) return id.includes("pro") ? 3 : 4;
-  if (id.includes("1.5")) return id.includes("pro") ? 5 : 6;
-  return 10;
+function geminiVersionRank(id: string): number {
+  const match = id.match(/^gemini-(\d+)\.(\d+)/);
+  if (!match) return 0;
+  return Number(match[1]) * 1000 + Number(match[2]) * 100;
+}
+
+function geminiQualityRank(id: string): number {
+  const version = geminiVersionRank(id);
+  if (version === 0) return version;
+  let score = version;
+  if (/pro/.test(id)) score += 50;
+  else if (/flash-lite|nano/.test(id)) score -= 30;
+  return score;
 }
 
 const OPENAI_VISION_PRIORITY: Record<string, number> = {
@@ -65,7 +78,77 @@ async function fetchGeminiModels(apiKey: string): Promise<string[]> {
   return (data?.models ?? [])
     .filter(isGeminiVisionModel)
     .map((entry) => entry.name?.replace(/^models\//, "") ?? "")
-    .sort((a, b) => geminiPriority(a) - geminiPriority(b));
+    .sort((a, b) => geminiQualityRank(b) - geminiQualityRank(a));
+}
+
+export async function discoverKeyModels(
+  apiKey: string
+): Promise<string[]> {
+  const models = await fetchGeminiModels(apiKey);
+  if (models.length === 0) {
+    throw new Error("No compatible Gemini vision models found for this key");
+  }
+  return models;
+}
+
+export async function refreshKeyModels(
+  entryId: string
+): Promise<string[]> {
+  const store = useAppStore.getState();
+  const entry = store.apiKeys.find((k) => k.id === entryId);
+  if (!entry) throw new Error("Key not found");
+  const models = await discoverKeyModels(entry.key);
+  store.updateApiKey(entryId, {
+    models,
+    modelsFetchedAt: Date.now(),
+  });
+  return models;
+}
+
+export async function refreshAllGeminiModels(): Promise<{
+  refreshed: string[];
+  failed: string[];
+}> {
+  const store = useAppStore.getState();
+  const keys = activeKeys(store.apiKeys, "gemini");
+  const refreshed: string[] = [];
+  const failed: string[] = [];
+  await Promise.all(
+    keys.map(async (key) => {
+      try {
+        const models = await discoverKeyModels(key.key);
+        store.updateApiKey(key.id, {
+          models,
+          modelsFetchedAt: Date.now(),
+        });
+        refreshed.push(key.id);
+      } catch (error) {
+        console.warn(`[Models] Failed to refresh models for ${key.id}`, error);
+        failed.push(key.id);
+      }
+    })
+  );
+  return { refreshed, failed };
+}
+
+export function modelsForKey(
+  entry: Pick<ApiKeyEntry, "models" | "modelStates">,
+  now = Date.now()
+): string[] {
+  const models = entry.models && entry.models.length > 0 ? entry.models : [];
+  if (models.length === 0) return [];
+  return models.filter((model) => !modelBlockedUntil(entry, model, now));
+}
+
+export function modelBlockedUntil(
+  entry: Pick<ApiKeyEntry, "models" | "modelStates">,
+  model: string,
+  now = Date.now()
+): number | null {
+  const state = entry.modelStates?.[model];
+  if (!state || state.until == null) return null;
+  if (state.until <= now) return null;
+  return state.until;
 }
 
 async function fetchOpenAIModels(apiKey: string): Promise<string[]> {

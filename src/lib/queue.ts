@@ -7,7 +7,14 @@ import {
   rotateKeys,
 } from "@/lib/api-keys";
 import { resultCacheKey } from "@/lib/cache";
-import { applyGenerationFailure, applyGenerationSuccess } from "@/lib/key-health";
+import {
+  applyGenerationFailure,
+  applyGenerationSuccess,
+  availableModelsFor,
+  clearModelUnavailable,
+  cooldownMsForError,
+  markModelUnavailable,
+} from "@/lib/key-health";
 import {
   friendlyApiError,
   generateLocal,
@@ -18,6 +25,7 @@ import {
   isKeyFailure,
   isModelUnavailable,
   isNetworkError,
+  isQuotaExceeded,
   isRateLimited,
   NoActiveKeyError,
   prepareImage,
@@ -32,12 +40,14 @@ import {
 import {
   ensureModelCache,
   modelListFor,
+  refreshKeyModels,
   refreshProviderModels,
 } from "@/lib/models";
 import { GEMINI_MULTI_MODEL_FALLBACK } from "@/lib/model-catalog";
 import { backoffDelayMs } from "@/lib/rate-limiter";
 import { autoPushAfterGeneration } from "@/lib/git-sync";
 import type {
+  ApiKeyEntry,
   ApiProvider,
   GenerationResult,
   GenerationSettings,
@@ -109,6 +119,44 @@ function modelChoices(provider: ApiProvider): string[] {
 
 let lastProviderSwitchToastAt = 0;
 let lastApiKeySwitchToastAt = 0;
+
+const keyDiscoveryAttempted = new Map<string, number>();
+const KEY_DISCOVERY_RETRY_MS = 60_000;
+
+async function resolveKeyModels(
+  entry: ApiKeyEntry,
+  fallbackModels: string[],
+  now: number
+): Promise<string[]> {
+  if (entry.provider !== "gemini") return fallbackModels;
+
+  const discovered =
+    entry.models && entry.models.length > 0 ? entry.models : null;
+  if (discovered) {
+    return availableModelsFor(entry, discovered, now);
+  }
+
+  const lastAttempt = keyDiscoveryAttempted.get(entry.id) ?? 0;
+  if (now - lastAttempt > KEY_DISCOVERY_RETRY_MS) {
+    keyDiscoveryAttempted.set(entry.id, now);
+    try {
+      const discoveredNow = await refreshKeyModels(entry.id);
+      const fresh =
+        useAppStore.getState().apiKeys.find((k) => k.id === entry.id) ?? entry;
+      const models =
+        discoveredNow.length > 0 ? discoveredNow : fallbackModels;
+      return availableModelsFor(fresh, models, now);
+    } catch (error) {
+      console.warn(
+        `[Queue] Model discovery failed for key ${maskKey(entry.key)}, using curated fallback list`,
+        error
+      );
+      return availableModelsFor(entry, fallbackModels, now);
+    }
+  }
+
+  return availableModelsFor(entry, fallbackModels, now);
+}
 
 function logProviderState(
   provider: ApiProvider,
@@ -244,7 +292,7 @@ async function generateWithKeys(
   pruneKeyCooldowns(now);
   const orderedKeys = rotateKeys(keys);
 
-  const models = modelChoices(provider);
+  const fallbackModels = modelChoices(provider);
 
   let sawRateLimit = false;
   let sawModelUnavailable = false;
@@ -258,6 +306,14 @@ async function generateWithKeys(
     if (cooldownUntil) {
       sawRateLimit = true;
       waitUntil = Math.min(waitUntil, cooldownUntil);
+      continue;
+    }
+
+    const models = await resolveKeyModels(key, fallbackModels, Date.now());
+    if (models.length === 0) {
+      console.warn(
+        `[${provider}] No usable models for key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)}), moving to the next key`
+      );
       continue;
     }
 
@@ -286,6 +342,7 @@ async function generateWithKeys(
                 ? generateWithOpenAI
                 : generateWithMistral;
           const result = await generate(image, key.key, model, settings, signal);
+          clearModelUnavailable(key.id, model);
           applyGenerationSuccess(key.id);
           return result;
         } catch (error) {
@@ -298,26 +355,37 @@ async function generateWithKeys(
           }
           if (isInvalidImageError(error)) throw error;
 
-          // Gemini multi-model fallback: on quota exhaustion (HTTP 429) or any
-          // model failure, retry the next model using the current key before
-          // moving to the next key. Only key-level failures skip to the next key.
+          // Gemini per-key model fallback: mark the failing model as
+          // temporarily unavailable for this key, then retry the next model
+          // on the same key before moving to the next key. Only key-level
+          // failures skip to the next key.
           if (provider === "gemini") {
             if (isRateLimited(error)) {
-              const until = Date.now() + rateLimitDelayMs(error);
+              const until = Date.now() + cooldownMsForError(error);
               sawRateLimit = true;
               waitUntil = Math.min(waitUntil, until);
-              applyGenerationFailure(key.id, error);
+              markModelUnavailable(
+                key.id,
+                model,
+                until,
+                isQuotaExceeded(error) ? "quota-exhausted" : "rate-limited"
+              );
               console.warn(
-                `[Gemini] Model ${model} quota exhausted or rate-limited (${maskKey(key.key)}), retrying with the next model`
+                `[Gemini] Model ${model} rate-limited/quota exhausted (${maskKey(key.key)}), marking unavailable and retrying with the next model`
               );
               continue modelLoop;
             }
             if (isModelUnavailable(error)) {
               sawModelUnavailable = true;
               nonRateLimitError ??= error;
-              applyGenerationFailure(key.id, error);
+              markModelUnavailable(
+                key.id,
+                model,
+                Date.now() + cooldownMsForError(error),
+                "model-unavailable"
+              );
               console.warn(
-                `[Gemini] Model ${model} unavailable (${maskKey(key.key)}), retrying with the next model`
+                `[Gemini] Model ${model} unavailable (${maskKey(key.key)}), marking unavailable and retrying with the next model`
               );
               continue modelLoop;
             }
@@ -333,8 +401,14 @@ async function generateWithKeys(
               continue keyLoop;
             }
             nonRateLimitError ??= error;
+            markModelUnavailable(
+              key.id,
+              model,
+              Date.now() + cooldownMsForError(error),
+              "server-error"
+            );
             console.warn(
-              `[Gemini] Model ${model} failed (${maskKey(key.key)}), retrying with the next model`
+              `[Gemini] Model ${model} failed (${maskKey(key.key)}), marking unavailable and retrying with the next model`
             );
             continue modelLoop;
           }
@@ -703,37 +777,44 @@ export async function runQueue(
     }
   };
 
-  const runSequential = async (items: ImageAsset[]): Promise<void> => {
-    let prefetch: Promise<void> | null = null;
-    for (let i = 0; i < items.length; i++) {
-      if (stopRequested) return;
-      while (pauseRequested) {
+  const CONCURRENCY = 3;
+
+  const runConcurrent = async (items: ImageAsset[]): Promise<void> => {
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
         if (stopRequested) return;
-        store.setQueueState("paused");
-        await sleep(160);
+        while (pauseRequested) {
+          if (stopRequested) return;
+          store.setQueueState("paused");
+          await sleep(160);
+        }
+        if (stopRequested) return;
+        store.setQueueState("running");
+
+        const index = nextIndex++;
+        if (index >= items.length) return;
+        const image = items[index];
+        if (hasApiKeys) {
+          try {
+            await prepareImage(image);
+          } catch {
+            // Image preparation is retried inside generation; keep going.
+          }
+        }
+        store.setActiveImageId(image.id);
+        await processTracked(image);
       }
-      if (stopRequested) return;
-      store.setQueueState("running");
+    };
 
-      if (prefetch) {
-        const pending = prefetch;
-        prefetch = null;
-        await pending;
-      } else if (hasApiKeys) {
-        await prepareImage(items[i]);
-      }
-
-      store.setActiveImageId(items[i].id);
-
-      if (hasApiKeys && i + 1 < items.length) {
-        prefetch = prepareImage(items[i + 1]);
-      }
-
-      await processTracked(items[i]);
-    }
+    const workers = Array.from(
+      { length: Math.min(CONCURRENCY, items.length) },
+      () => worker()
+    );
+    await Promise.all(workers);
   };
 
-  await runSequential(targets);
+  await runConcurrent(targets);
 
   const cancelled = stopRequested;
 

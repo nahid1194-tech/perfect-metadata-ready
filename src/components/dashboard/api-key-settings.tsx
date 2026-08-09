@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Activity,
   AlertTriangle,
@@ -12,9 +12,11 @@ import {
   EyeOff,
   HelpCircle,
   KeyRound,
+  Layers,
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   ShieldAlert,
   Trash2,
   WifiOff,
@@ -35,10 +37,11 @@ import {
   formatTimeAgo,
   maskKeyBullets,
   summarizeKeyHealth,
+  summarizeModelHealth,
   testKeyHealth,
   type KeyHealthSummary,
 } from "@/lib/key-health"
-import { refreshProviderModels } from "@/lib/models"
+import { refreshAllGeminiModels, refreshProviderModels } from "@/lib/models"
 import type { ApiKeyEntry, ApiProvider, KeyHealthStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -245,6 +248,37 @@ function KeyHealthDetails({ entry }: { entry: ApiKeyEntry }) {
   );
 }
 
+function KeyModelHealth({ entry }: { entry: ApiKeyEntry }) {
+  if (entry.provider !== "gemini" || !entry.models || entry.models.length === 0) {
+    return null;
+  }
+  const summary = summarizeModelHealth(entry);
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+      <span className="flex items-center gap-1">
+        <Layers className="size-3" />
+        Models available: {summary.available}
+      </span>
+      <span className="text-emerald-600 dark:text-emerald-400">
+        Healthy: {summary.healthy}
+      </span>
+      <span className="text-amber-600 dark:text-amber-400">
+        Rate limited: {summary.rateLimited}
+      </span>
+      {summary.quotaExhausted > 0 ? (
+        <span className="text-amber-600 dark:text-amber-400">
+          Quota exhausted: {summary.quotaExhausted}
+        </span>
+      ) : null}
+      {summary.unavailable > 0 ? (
+        <span className="text-destructive dark:text-red-400">
+          Unavailable: {summary.unavailable}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ApiKeySettings() {
   const primaryProvider = useAppStore((state) => state.primaryProvider);
   const apiKeys = useAppStore((state) => state.apiKeys);
@@ -366,6 +400,24 @@ function ProviderKeys({
   const [testAllSummary, setTestAllSummary] = useState<KeyHealthSummary | null>(
     null
   );
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const autoRefreshRef = useRef(false);
+
+  useEffect(() => {
+    if (autoRefreshRef.current || provider !== "gemini") return;
+    const needsDiscovery = providerKeys.some(
+      (entry) => !entry.models || entry.models.length === 0
+    );
+    if (!needsDiscovery) return;
+    autoRefreshRef.current = true;
+    void (async () => {
+      try {
+        await refreshAllGeminiModels();
+      } catch {
+        // Silent: user can refresh manually.
+      }
+    })();
+  }, [provider, providerKeys]);
 
   const clearForm = () => {
     setKeyValue("");
@@ -437,6 +489,37 @@ function ProviderKeys({
       setKeyHealthCheckedAt(Date.now());
     } finally {
       setTestingAll(false);
+    }
+  };
+
+  const refreshModels = async () => {
+    if (provider === "gemini") {
+      if (providerKeys.length === 0 || refreshingModels) return;
+      setRefreshingModels(true);
+      try {
+        const { refreshed, failed } = await refreshAllGeminiModels();
+        if (refreshed.length > 0) {
+          toast(
+            "success",
+            "Models refreshed",
+            `${refreshed.length} key${refreshed.length === 1 ? "" : "s"} updated with the latest Gemini models.`
+          );
+        }
+        if (failed.length > 0) {
+          toast(
+            "error",
+            "Some refreshes failed",
+            `${failed.length} key${failed.length === 1 ? "" : "s"} could not reach the Gemini Models API.`
+          );
+        }
+      } catch (error) {
+        toast("error", "Models refresh failed", friendlyApiError(error));
+      } finally {
+        setRefreshingModels(false);
+      }
+    } else {
+      void refreshProviderModels(provider, { force: true });
+      toast("success", "Models refreshed", `${title} model list updated.`);
     }
   };
 
@@ -514,24 +597,50 @@ function ProviderKeys({
         <div className="flex items-center gap-2">
           <p className="text-sm font-semibold tracking-tight">{title}</p>
           <Badge variant="secondary" className="text-xs">
-            Primary
+            {providerKeys.length} API{" "}
+            {providerKeys.length === 1 ? "Key" : "Keys"}
           </Badge>
+          {provider === "gemini" ? (
+            <Badge
+              variant="outline"
+              className="gap-1 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400"
+            >
+              <Check className="size-3" />
+              Auto model selection: ON
+            </Badge>
+          ) : null}
         </div>
         {providerKeys.length > 0 ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={testingAll}
-            onClick={testAllKeys}
-          >
-            {testingAll ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Activity className="size-3.5" />
-            )}
-            Test All Keys
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={refreshingModels}
+              onClick={refreshModels}
+            >
+              {refreshingModels ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              Refresh Models
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={testingAll}
+              onClick={testAllKeys}
+            >
+              {testingAll ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Activity className="size-3.5" />
+              )}
+              Test All Keys
+            </Button>
+          </div>
         ) : null}
       </div>
 
@@ -661,6 +770,7 @@ function ProviderKeys({
                     </Button>
                   </div>
                   {health ? <KeyHealthDetails entry={entry} /> : null}
+                  <KeyModelHealth entry={entry} />
                 </li>
               );
             })}

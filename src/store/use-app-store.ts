@@ -390,6 +390,13 @@ export const useAppStore = create<AppState>()(
                 : "gemini",
               key: entry.key,
               enabled: entry.enabled ?? true,
+              health: entry.health,
+              models: Array.isArray(entry.models) ? entry.models : undefined,
+              modelStates: entry.modelStates,
+              modelsFetchedAt:
+                typeof entry.modelsFetchedAt === "number"
+                  ? entry.modelsFetchedAt
+                  : null,
             })
           );
         }

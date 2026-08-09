@@ -509,6 +509,90 @@ export function applyGenerationSuccess(entryId: string): void {
   });
 }
 
+export function markModelUnavailable(
+  entryId: string,
+  modelId: string,
+  until: number,
+  reason: "rate-limited" | "quota-exhausted" | "model-unavailable" | "server-error"
+): void {
+  const store = useAppStore.getState();
+  const entry = store.apiKeys.find((item) => item.id === entryId);
+  if (!entry) return;
+  const modelStates = { ...(entry.modelStates ?? {}) };
+  modelStates[modelId] = { until, reason };
+  store.updateApiKey(entryId, { modelStates });
+}
+
+export function clearModelUnavailable(
+  entryId: string,
+  modelId: string
+): void {
+  const store = useAppStore.getState();
+  const entry = store.apiKeys.find((item) => item.id === entryId);
+  if (!entry || !entry.modelStates) return;
+  const modelStates = { ...entry.modelStates };
+  delete modelStates[modelId];
+  store.updateApiKey(entryId, { modelStates });
+}
+
+export function clearAllModelStates(entryId: string): void {
+  const store = useAppStore.getState();
+  const entry = store.apiKeys.find((item) => item.id === entryId);
+  if (!entry) return;
+  store.updateApiKey(entryId, { modelStates: {} });
+}
+
+export function modelUnavailableUntil(
+  entry: Pick<ApiKeyEntry, "modelStates">,
+  modelId: string,
+  now = Date.now()
+): number | null {
+  const state = entry.modelStates?.[modelId];
+  if (!state || state.until == null) return null;
+  if (state.until <= now) return null;
+  return state.until;
+}
+
+export function availableModelsFor(
+  entry: Pick<ApiKeyEntry, "models" | "modelStates">,
+  models: string[],
+  now = Date.now()
+): string[] {
+  const list = entry.models && entry.models.length > 0 ? entry.models : models;
+  return list.filter((model) => modelUnavailableUntil(entry, model, now) == null);
+}
+
+export function summarizeModelHealth(
+  entry: Pick<ApiKeyEntry, "models" | "modelStates">,
+  now = Date.now()
+): {
+  available: number;
+  healthy: number;
+  rateLimited: number;
+  quotaExhausted: number;
+  unavailable: number;
+} {
+  const models = entry.models && entry.models.length > 0 ? entry.models : [];
+  const states = entry.modelStates ?? {};
+  let rateLimited = 0;
+  let quotaExhausted = 0;
+  let unavailable = 0;
+  for (const model of models) {
+    const state = states[model];
+    if (!state || state.until == null || state.until <= now) continue;
+    if (state.reason === "rate-limited") rateLimited++;
+    else if (state.reason === "quota-exhausted") quotaExhausted++;
+    else unavailable++;
+  }
+  return {
+    available: models.length,
+    healthy: models.length - rateLimited - quotaExhausted - unavailable,
+    rateLimited,
+    quotaExhausted,
+    unavailable,
+  };
+}
+
 export function scheduleKeyAutoRecheck(
   entryId: string,
   delayMs: number
@@ -539,22 +623,26 @@ export function cancelKeyAutoRecheck(entryId: string): void {
 }
 
 export function cooldownMsForError(
-  error: {
-    status?: number;
-    message?: string;
-    code?: string | null;
-    retryAfterMs?: number;
-  }
+  error: unknown
 ): number {
-  if (error.retryAfterMs && error.retryAfterMs > 0) return error.retryAfterMs;
-  if (error.status === 429) {
-    const text = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
+  const err =
+    error != null && typeof error === "object"
+      ? (error as {
+          status?: number;
+          message?: string;
+          code?: string | null;
+          retryAfterMs?: number;
+        })
+      : null;
+  if (err?.retryAfterMs && err.retryAfterMs > 0) return err.retryAfterMs;
+  if (err?.status === 429) {
+    const text = `${err.code ?? ""} ${err.message ?? ""}`.toLowerCase();
     if (/daily|per\s*day|quota|exhausted|billing/i.test(text)) {
       return QUOTA_COOLDOWN_MS;
     }
     return RATE_LIMIT_COOLDOWN_MS;
   }
-  if (error.status === 401 || error.status === 403) {
+  if (err?.status === 401 || err?.status === 403) {
     return INVALID_KEY_COOLDOWN_MS;
   }
   return RATE_LIMIT_COOLDOWN_MS;

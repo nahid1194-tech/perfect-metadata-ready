@@ -79,12 +79,26 @@ export type KeyHealthCheck = {
   cooldownUntil: number | null;
 };
 
+export type KeyModelReason =
+  | "rate-limited"
+  | "quota-exhausted"
+  | "model-unavailable"
+  | "server-error";
+
+export type KeyModelState = {
+  until: number | null;
+  reason: KeyModelReason;
+};
+
 export type ApiKeyEntry = {
   id: string;
   provider: ApiProvider;
   key: string;
   enabled: boolean;
   health?: KeyHealthCheck;
+  models?: string[];
+  modelStates?: Record<string, KeyModelState>;
+  modelsFetchedAt?: number | null;
 };
 
 export type Marketplace = "adobe" | "shutterstock";

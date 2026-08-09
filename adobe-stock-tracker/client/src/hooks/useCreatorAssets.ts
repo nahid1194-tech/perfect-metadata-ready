@@ -159,40 +159,43 @@ export function useCreatorAssets() {
 
   const refresh = useCallback(() => setRefreshNonce((n) => n + 1), []);
 
-  const loadMore = useCallback(() => {
-    if (mode !== 'api') return;
-    if (!creatorId || phase === 'loading' || phase === 'loading-more' || phase === 'analyzing') return;
-    if (!hasMore) return;
-    const controller = new AbortController();
-    activeController.current = controller;
-    setPhase('loading-more');
+  /** Fetch a specific page (1-based) and REPLACE the loaded assets. */
+  const goToPage = useCallback(
+    (targetPage: number) => {
+      if (mode !== 'api') return;
+      if (!creatorId || phase === 'loading' || phase === 'loading-more' || phase === 'analyzing') return;
+      const safePage = Math.max(1, Math.floor(targetPage));
+      const controller = new AbortController();
+      activeController.current = controller;
+      setPhase('loading');
 
-    fetchCreatorAssets(creatorId, { filter, sort, contentType, page: page + 1, limit: PAGE_SIZE }, controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        setAssets((prev) => {
-          const seen = new Set(prev.map((a) => a.id));
-          return [...prev, ...res.assets.filter((a) => !seen.has(a.id))];
+      fetchCreatorAssets(creatorId, { filter, sort, contentType, page: safePage, limit: PAGE_SIZE }, controller.signal)
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          setAssets(res.assets);
+          setTotal(res.total);
+          setHasMore(res.hasMore);
+          setPage(res.page);
+          setSourceStatus(res.source);
+          setSourceMessage(res.sourceMessage ?? null);
+          setNotice(res.notice ?? null);
+          setProvider(res.provider ?? null);
+          setPhase('loaded');
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          setError(err as ApiError);
+          setPhase('loaded');
         });
-        setTotal(res.total);
-        setHasMore(res.hasMore);
-        setPage(res.page);
-        setSourceStatus(res.source);
-        setSourceMessage(res.sourceMessage ?? null);
-        setNotice(res.notice ?? null);
-        setProvider(res.provider ?? null);
-        setPhase('loaded');
-      })
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return;
-        setError(err as ApiError);
-        setPhase('loaded');
-      });
-  }, [creatorId, mode, phase, hasMore, filter, sort, contentType, page]);
+    },
+    [creatorId, mode, phase, filter, sort, contentType],
+  );
 
   const changeFilter = useCallback((value: FilterOption) => setFilter(value), []);
   const changeSort = useCallback((value: SortOption) => setSort(value), []);
   const changeContentType = useCallback((value: ContentTypeFilter) => setContentType(value), []);
+
+  const totalPages = total === null ? null : Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return {
     input,
@@ -214,13 +217,14 @@ export function useCreatorAssets() {
     total,
     hasMore,
     page,
+    totalPages,
     sourceStatus,
     sourceMessage,
     notice,
     provider,
     phase,
     error,
-    loadMore,
+    goToPage,
     refresh,
   };
 }

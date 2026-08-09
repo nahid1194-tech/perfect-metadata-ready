@@ -49,6 +49,9 @@ export const config = {
     licenseHistoryBaseUrl:
       process.env.ADOBE_LICENSE_HISTORY_BASE_URL ?? 'https://stock.adobe.io/Rest/Libraries/1/Member/LicenseHistory',
     licenseHistoryMaxPages: int('ADOBE_LICENSE_HISTORY_MAX_PAGES', 10),
+    // When true, the server logs each Adobe response's field presence (e.g.
+    // which thumbnail_* columns Adobe actually returned) to the console.
+    debug: process.env.ADOBE_STOCK_DEBUG === 'true',
     // Max concurrent upstream Adobe requests (a polite client-side queue).
     concurrency: int('ADOBE_REQUEST_CONCURRENCY', 2),
     // Retries for transient upstream failures (429/5xx) using exponential backoff.

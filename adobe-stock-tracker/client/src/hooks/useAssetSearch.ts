@@ -149,39 +149,42 @@ export function useAssetSearch() {
 
   const refresh = useCallback(() => setRefreshNonce((n) => n + 1), []);
 
-  const loadMore = useCallback(() => {
-    if (mode !== 'api') return;
-    if (!query || phase === 'loading' || phase === 'loading-more') return;
-    if (!hasMore) return;
-    const controller = new AbortController();
-    activeController.current = controller;
-    setPhase('loading-more');
+  /** Fetch a specific page (1-based) and REPLACE the loaded assets. */
+  const goToPage = useCallback(
+    (targetPage: number) => {
+      if (mode !== 'api') return;
+      if (!query || phase === 'loading' || phase === 'loading-more') return;
+      const safePage = Math.max(1, Math.floor(targetPage));
+      const controller = new AbortController();
+      activeController.current = controller;
+      setPhase('loading');
 
-    fetchAssetSearch(query, { filter, sort, page: page + 1, limit: PAGE_SIZE }, controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted) return;
-        setAssets((prev) => {
-          const seen = new Set(prev.map((a) => a.id));
-          return [...prev, ...res.assets.filter((a) => !seen.has(a.id))];
+      fetchAssetSearch(query, { filter, sort, page: safePage, limit: PAGE_SIZE }, controller.signal)
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          setAssets(res.assets);
+          setTotal(res.total);
+          setHasMore(res.hasMore);
+          setPage(res.page);
+          setSourceStatus(res.source);
+          setSourceMessage(res.sourceMessage ?? null);
+          setNotice(res.notice ?? null);
+          setProvider(res.provider ?? null);
+          setPhase('loaded');
+        })
+        .catch((err: unknown) => {
+          if (controller.signal.aborted) return;
+          setError(err as ApiError);
+          setPhase('loaded');
         });
-        setTotal(res.total);
-        setHasMore(res.hasMore);
-        setPage(res.page);
-        setSourceStatus(res.source);
-        setSourceMessage(res.sourceMessage ?? null);
-        setNotice(res.notice ?? null);
-        setProvider(res.provider ?? null);
-        setPhase('loaded');
-      })
-      .catch((err: unknown) => {
-        if (controller.signal.aborted) return;
-        setError(err as ApiError);
-        setPhase('loaded');
-      });
-  }, [query, mode, phase, hasMore, filter, sort, page]);
+    },
+    [query, mode, phase, filter, sort],
+  );
 
   const changeFilter = useCallback((value: AssetSearchFilter) => setFilter(value), []);
   const changeSort = useCallback((value: AssetSearchSort) => setSort(value), []);
+
+  const totalPages = total === null ? null : Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return {
     input,
@@ -200,13 +203,14 @@ export function useAssetSearch() {
     total,
     hasMore,
     page,
+    totalPages,
     sourceStatus,
     sourceMessage,
     notice,
     provider,
     phase,
     error,
-    loadMore,
+    goToPage,
     refresh,
   };
 }

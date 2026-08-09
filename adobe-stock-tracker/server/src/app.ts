@@ -2,11 +2,13 @@ import cors from 'cors';
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import adobeRouter from './routes/adobe';
 import analyticsRouter from './routes/analytics';
 import assetRouter from './routes/assets';
 import creatorRouter from './routes/creator';
 import licenseHistoryRouter from './routes/licenseHistory';
 import searchRouter from './routes/search';
+import settingsRouter from './routes/settings';
 import { apiRateLimiter } from './middleware/rateLimit';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
@@ -22,11 +24,13 @@ export function createApp(): express.Express {
   });
 
   app.use('/api', apiRateLimiter);
+  app.use('/api', adobeRouter);
   app.use('/api', creatorRouter);
   app.use('/api', searchRouter);
   app.use('/api', assetRouter);
   app.use('/api', analyticsRouter);
   app.use('/api', licenseHistoryRouter);
+  app.use('/api', settingsRouter);
 
   // Serve the built client in production (npm run build && npm start).
   const clientDist = path.resolve(__dirname, '../../client/dist');

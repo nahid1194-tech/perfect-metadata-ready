@@ -109,12 +109,56 @@ export interface AssetPopularitySignal {
 export interface Asset {
   id: string;
   title: string | null;
+  /** Best available thumbnail, resolved server-side (1000 → 500 → default). */
   thumbnail: string | null;
+  /** Adobe's 500px thumbnail URL, when available. */
+  thumbnail500: string | null;
+  /** Adobe's default thumbnail URL, when available. */
+  thumbnailUrl: string | null;
+  /** Adobe's 1000px thumbnail URL, when available. */
+  thumbnail1000: string | null;
+  /** Pixel dimensions of the default thumbnail, when available. */
+  thumbnailWidth?: number | null;
+  thumbnailHeight?: number | null;
+  /** Pixel dimensions of the 1000px thumbnail, when available. */
+  thumbnail1000Width?: number | null;
+  thumbnail1000Height?: number | null;
+  /** Smaller preview tiers, when available. */
+  thumbnail110Url?: string | null;
+  thumbnail160Url?: string | null;
+  thumbnail240Url?: string | null;
+  /** Model/property release flag, when available. */
+  hasReleases?: boolean | null;
+  /** Direct compile/download URL, when available. */
+  compUrl?: string | null;
+  /** Whether the authenticated user has licensed this asset (requires auth). */
+  isLicensed?: boolean | null;
+  /** Video frame rate (fps) / duration (s), when available. */
+  framerate?: number | null;
+  duration?: number | null;
+  /** File size in bytes, when available. */
+  sizeBytes?: number | null;
+  /** Premium tier ID / premium flag, when available. */
+  premiumLevelId?: number | null;
+  isLoop?: boolean | null;
+  /** Video preview URLs, when available. */
+  videoPreviewUrl?: string | null;
+  videoSmallPreviewUrl?: string | null;
+  /** Marketing copy / production country, when available. */
+  marketingText?: string | null;
+  countryName?: string | null;
+  /** Template type / category IDs, when available. */
+  templateTypeId?: number | null;
+  templateCategoryIds?: string[] | null;
   assetUrl: string | null;
   creatorId: string;
   creatorName: string | null;
   keywords: string[] | null;
   contentType: ContentType;
+  /** Vector subtype ("zip" / "svg") when Adobe provides it. */
+  vectorType?: string | null;
+  /** Premium-collection flag, when Adobe provides it. */
+  isPremium?: boolean | null;
   downloads: number | null;
   createdAt: string | null;
   status: AssetStatus;
@@ -314,4 +358,35 @@ export interface AssetQuery {
   contentType?: ContentTypeFilter;
   page?: number;
   limit?: number;
+}
+
+/** Response of GET /api/settings (public configuration, no secrets). */
+export interface SettingsResponse {
+  provider: string;
+  providerMode: ProviderMode;
+  apiKeyConfigured: boolean;
+  apiStatus: 'configured' | 'not_configured';
+  product: string;
+  locale: string;
+  apiBaseUrl: string;
+  siteSearchBaseUrl: string;
+  licenseHistory: { authorized: boolean };
+  database: { enabled: boolean; label: string };
+  environment: {
+    nodeEnv: string;
+    port: number;
+    rateLimitMax: number;
+    rateLimitWindowMs: number;
+    cacheTtlMs: number;
+    observationSchedulerEnabled: boolean;
+  };
+}
+
+/** Result of POST /api/settings/test-connection. */
+export type ApiConnectionStatus = 'connected' | 'not_configured' | 'invalid' | 'rate_limited' | 'failed';
+
+export interface TestConnectionResponse {
+  status: ApiConnectionStatus;
+  latencyMs?: number;
+  message: string;
 }

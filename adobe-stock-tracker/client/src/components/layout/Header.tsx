@@ -1,8 +1,8 @@
-import { BarChart3, History, Github } from 'lucide-react';
+import { BarChart3, History, Github, Settings } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
-export type AppPage = 'dashboard' | 'license-history';
+export type AppPage = 'dashboard' | 'license-history' | 'settings';
 
 interface HeaderProps {
   page: AppPage;
@@ -47,6 +47,7 @@ export function Header({ page, onNavigate }: HeaderProps) {
         <div className="flex items-center gap-2">
           {navButton('dashboard', 'Dashboard', <BarChart3 className="size-3.5" />)}
           {navButton('license-history', 'My License History', <History className="size-3.5" />)}
+          {navButton('settings', 'Settings', <Settings className="size-3.5" />)}
           <a
             href="https://github.com"
             target="_blank"

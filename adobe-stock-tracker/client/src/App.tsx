@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ExternalLink, RotateCcw, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, ExternalLink, RotateCcw, ShieldCheck } from 'lucide-react';
 
 import { AssetCard } from '@/components/assets/AssetCard';
 import { AssetGrid, SkeletonGrid } from '@/components/assets/AssetGrid';
@@ -13,13 +13,15 @@ import { DashboardToolbar } from '@/components/dashboard/DashboardToolbar';
 import { HistoryPanel } from '@/components/dashboard/HistoryPanel';
 import { SearchLinkButtons } from '@/components/dashboard/SearchLinkButtons';
 import { SearchModeTabs } from '@/components/dashboard/SearchModeTabs';
+import { SettingsPage } from '@/components/dashboard/SettingsPage';
+import { SimilarImagesPanel } from '@/components/dashboard/SimilarImagesPanel';
 import { StatCards } from '@/components/dashboard/StatCards';
 import { SummaryCards } from '@/components/dashboard/SummaryCards';
 import { ApiNotConnected } from '@/components/feedback/ApiNotConnected';
 import { EmptyState } from '@/components/feedback/EmptyState';
 import { ErrorState } from '@/components/feedback/ErrorState';
 import { DataNote } from '@/components/feedback/DataNote';
-import { LoadMore } from '@/components/feedback/LoadMore';
+import { PaginationBar } from '@/components/feedback/PaginationBar';
 import { LoadingBanner, SourceBanner } from '@/components/feedback/SourceBanner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +32,7 @@ import { useCreatorAssets } from '@/hooks/useCreatorAssets';
 import { useSummary } from '@/hooks/useSummary';
 import { Header, type AppPage } from '@/components/layout/Header';
 import { LicenseHistoryPage } from '@/components/dashboard/LicenseHistoryPage';
+import { formatCount } from '@/lib/utils';
 import type { SearchMode, SourceStatus } from '@/types';
 
 const PROBLEM_SOURCES: SourceStatus[] = ['blocked', 'unavailable', 'rate_limited', 'timeout', 'error'];
@@ -37,6 +40,7 @@ const PROBLEM_SOURCES: SourceStatus[] = ['blocked', 'unavailable', 'rate_limited
 export default function App() {
   const [searchMode, setSearchMode] = useState<SearchMode>('creator');
   const [page, setPage] = useState<AppPage>('dashboard');
+  const [showSimilar, setShowSimilar] = useState(false);
 
   const summary = useSummary();
   const creator = useCreatorAssets();
@@ -71,7 +75,6 @@ export default function App() {
     provider: assetProvider,
     assets: assetAssets,
     total: assetTotal,
-    hasMore: assetHasMore,
   } = asset;
 
   const {
@@ -87,6 +90,12 @@ export default function App() {
     asset: assetIdAsset,
     result: assetIdResult,
   } = assetId;
+
+  // The "Find Similar Images" panel belongs to one specific asset lookup;
+  // reset it whenever the asset ID (or the page/section) changes.
+  useEffect(() => {
+    setShowSimilar(false);
+  }, [assetIdValue, page, searchMode]);
 
   const isCreatorMode = searchMode === 'creator';
   const isAssetMode = searchMode === 'asset';
@@ -110,6 +119,29 @@ export default function App() {
         ? { source: creatorSourceStatus as SourceStatus, message: creatorSourceMessage ?? '' }
         : null;
 
+  // After a successful Creator search the dashboard counters are derived from
+  // the actual returned API results. They never claim to represent the
+  // contributor's complete portfolio (the API filters out premium assets and
+  // the app only loads the pages fetched so far).
+  const summaryOverride =
+    isCreatorMode && isApiMode && creatorSourceStatus === 'ok' && creatorTotal !== null
+      ? {
+          totalAssets: creatorTotal,
+          indexedAssets: creatorAssets.length,
+          assetsWithAvailableMetrics: creatorAssets.filter(
+            (asset) =>
+              asset.popularity !== null ||
+              asset.downloads !== null ||
+              (asset.observationCount !== null && asset.observationCount > 0),
+          ).length,
+          totalObservations: creatorAssets.reduce((sum, asset) => sum + (asset.observationCount ?? 0), 0),
+          note:
+            creatorHasMore || creatorTotal > creatorAssets.length
+              ? 'API total; loaded pages only'
+              : 'API total for the current search',
+        }
+      : null;
+
   const heroTitle = isCreatorMode
     ? 'Analyze any Adobe Stock contributor'
     : isAssetMode
@@ -129,10 +161,19 @@ export default function App() {
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <LicenseHistoryPage />
         </main>
+      ) : page === 'settings' ? (
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+          <SettingsPage />
+        </main>
       ) : (
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
         <div className="space-y-6">
-          <SummaryCards summary={summary.summary} loading={summary.phase === 'loading'} onRefresh={summary.refresh} />
+          <SummaryCards
+            summary={summary.summary}
+            loading={summary.phase === 'loading'}
+            onRefresh={summary.refresh}
+            override={summaryOverride}
+          />
 
           <div className="space-y-4">
             <SearchModeTabs value={searchMode} onValueChange={setSearchMode} />
@@ -180,9 +221,21 @@ export default function App() {
           {isCreatorMode && creatorId && (
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
+                <div className="min-w-0 space-y-1">
                   <h2 className="text-lg font-semibold tracking-tight">Contributor #{creatorId}</h2>
-                  <p className="text-xs text-muted-foreground">Public assets from the Adobe Stock search index</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-sm text-muted-foreground">
+                      {creatorAssets[0]?.creatorName
+                        ? `${creatorAssets[0].creatorName} · ${formatCount(creatorTotal ?? 0)} total assets found`
+                        : 'Public assets from the Adobe Stock search index'}
+                    </p>
+                    {isApiMode && creatorSourceStatus === 'ok' && (
+                      <Badge variant="success" className="gap-1">
+                        <Check className="size-3" />
+                        Adobe Stock API Connected
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <Button variant="ghost" size="sm" onClick={creator.reset}>
                   <RotateCcw />
@@ -235,12 +288,12 @@ export default function App() {
                     {!initialLoading && !creatorError && creatorAssets.length > 0 && (
                       <>
                         <AssetGrid assets={creatorAssets} />
-                        <LoadMore
-                          hasMore={creatorHasMore}
-                          loading={creatorPhase === 'loading-more'}
-                          shown={creatorAssets.length}
+                        <PaginationBar
+                          page={creator.page}
                           total={creatorTotal}
-                          onLoadMore={creator.loadMore}
+                          pageSize={100}
+                          loading={creatorPhase === 'loading' || creatorPhase === 'loading-more'}
+                          onPageChange={creator.goToPage}
                         />
                       </>
                     )}
@@ -251,10 +304,10 @@ export default function App() {
                       (creatorSourceStatus === 'empty' ||
                         (creatorSourceStatus && PROBLEM_SOURCES.includes(creatorSourceStatus))) && (
                         <EmptyState
-                          title={creatorSourceStatus === 'empty' ? 'No assets found' : 'No data to display'}
+                          title={creatorSourceStatus === 'empty' ? 'No public assets found.' : 'No data to display'}
                           description={
                             creatorSourceStatus === 'empty'
-                              ? 'This creator has no publicly visible assets, or Adobe did not return any results. Try another Creator ID.'
+                              ? 'Adobe did not return any publicly visible assets for this Creator ID. Try another Creator ID.'
                               : 'The Adobe Stock API is unavailable, so no assets can be loaded. See the message above for details.'
                           }
                         />
@@ -312,12 +365,12 @@ export default function App() {
                     {!initialLoading && !assetError && assetAssets.length > 0 && (
                       <>
                         <AssetGrid assets={assetAssets} />
-                        <LoadMore
-                          hasMore={assetHasMore}
-                          loading={assetPhase === 'loading-more'}
-                          shown={assetAssets.length}
+                        <PaginationBar
+                          page={asset.page}
                           total={assetTotal}
-                          onLoadMore={asset.loadMore}
+                          pageSize={100}
+                          loading={assetPhase === 'loading' || assetPhase === 'loading-more'}
+                          onPageChange={asset.goToPage}
                         />
                       </>
                     )}
@@ -328,7 +381,7 @@ export default function App() {
                       (assetSourceStatus === 'empty' ||
                         (assetSourceStatus && PROBLEM_SOURCES.includes(assetSourceStatus))) && (
                         <EmptyState
-                          title={assetSourceStatus === 'empty' ? 'No assets found' : 'No data to display'}
+                          title={assetSourceStatus === 'empty' ? 'No public assets found.' : 'No data to display'}
                           description={
                             assetSourceStatus === 'empty'
                               ? 'Adobe Stock returned no matches for this search. Try a different title or keyword.'
@@ -362,10 +415,10 @@ export default function App() {
               {!initialLoading && !assetIdError && assetIdLinks && isLinkMode && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
                   <div className="space-y-2">
-                    <p className="font-medium">API not connected</p>
+                    <p className="font-medium">Adobe Stock API is not configured.</p>
                     <p className="text-xs opacity-90">
                       {assetIdSourceMessage ??
-                        'Live asset data requires an Adobe Stock API key (set ADOBE_API_CLIENT_ID in server/.env).'}
+                        'Configure Adobe Stock API credentials to display asset previews (set ADOBE_STOCK_API_KEY in server/.env).'}
                     </p>
                     <Button asChild variant="outline" size="sm">
                       <a href={assetIdLinks.link} target="_blank" rel="noreferrer">
@@ -387,7 +440,7 @@ export default function App() {
 
                   {assetIdAsset ? (
                     <div className="mx-auto max-w-sm">
-                      <AssetCard asset={assetIdAsset} />
+                      <AssetCard asset={assetIdAsset} onFindSimilar={() => setShowSimilar(true)} />
                     </div>
                   ) : (
                     <EmptyState
@@ -395,6 +448,8 @@ export default function App() {
                       description={`Adobe Stock returned no asset with media ID ${assetIdValue}. Double-check the ID.`}
                     />
                   )}
+
+                  {showSimilar && assetIdAsset && <SimilarImagesPanel assetId={assetIdValue} />}
 
                   {assetIdResult?.historyAvailable === false && (
                     <p className="text-xs text-muted-foreground">

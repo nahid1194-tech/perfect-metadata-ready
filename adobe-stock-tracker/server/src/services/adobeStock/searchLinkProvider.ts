@@ -76,6 +76,20 @@ export class SearchLinkProvider {
     };
   }
 
+  async searchSimilar(assetId: string, params: AssetSearchParams): Promise<AssetSearchResult> {
+    return {
+      query: String(assetId),
+      assets: [],
+      total: null,
+      page: params.page,
+      pageSize: params.limit,
+      hasMore: false,
+      source: 'unavailable',
+      sourceMessage: LINK_MODE_MESSAGE,
+      provider: this.name,
+    };
+  }
+
   async searchByAssetId(assetId: string): Promise<AssetMetadataResult> {
     return this.getAssetMetadata(assetId);
   }

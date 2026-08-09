@@ -10,6 +10,19 @@ interface SummaryCardsProps {
   summary: SummaryResponse | null;
   loading: boolean;
   onRefresh: () => void;
+  /**
+   * When a Creator search has returned real API data, the counters are
+   * derived from those actual results instead of the (possibly empty) local
+   * index. They are labeled as coming from the current search and never
+   * claim to be the contributor's complete portfolio.
+   */
+  override?: {
+    totalAssets: number | null;
+    indexedAssets: number | null;
+    assetsWithAvailableMetrics: number | null;
+    totalObservations: number | null;
+    note: string;
+  } | null;
 }
 
 interface CardData {
@@ -19,27 +32,28 @@ interface CardData {
   note?: string;
 }
 
-export function SummaryCards({ summary, loading, onRefresh }: SummaryCardsProps) {
+export function SummaryCards({ summary, loading, onRefresh, override }: SummaryCardsProps) {
+  const base = override ?? summary;
   const items: CardData[] = [
     {
       label: 'Total Assets',
-      value: summary?.totalAssets ?? null,
+      value: base?.totalAssets ?? null,
       icon: <Layers className="size-4" />,
     },
     {
       label: 'Indexed Assets',
-      value: summary?.indexedAssets ?? null,
+      value: base?.indexedAssets ?? null,
       icon: <Database className="size-4" />,
     },
     {
       label: 'Assets With Available Metrics',
-      value: summary?.assetsWithAvailableMetrics ?? null,
+      value: base?.assetsWithAvailableMetrics ?? null,
       icon: <Activity className="size-4" />,
       note: 'assets with an exact or popularity metric',
     },
     {
       label: 'Total Historical Observations',
-      value: summary?.totalObservations ?? null,
+      value: base?.totalObservations ?? null,
       icon: <TrendingUp className="size-4" />,
     },
   ];
@@ -48,8 +62,10 @@ export function SummaryCards({ summary, loading, onRefresh }: SummaryCardsProps)
     <section aria-label="Local index summary" className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          Local index: {summary?.storeLabel ?? '—'}
-          {summary?.historyAvailable === false && ' · observations are session-only'}
+          {override
+            ? `Counters from the current Adobe Stock API search${override.note ? ` · ${override.note}` : ''}`
+            : `Local index: ${summary?.storeLabel ?? '—'}`}
+          {!override && summary?.historyAvailable === false && ' · observations are session-only'}
         </p>
         <Button variant="ghost" size="sm" onClick={onRefresh}>
           <RotateCcw />

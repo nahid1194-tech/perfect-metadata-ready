@@ -50,11 +50,11 @@ export function AssetSearchLinksPanel({ links }: AssetSearchLinksPanelProps) {
         <div className="flex items-start gap-2.5">
           <Unplug className="mt-0.5 size-4 shrink-0" />
           <div className="space-y-1">
-            <p className="font-medium">API not connected — search-link mode is active</p>
+            <p className="font-medium">Adobe Stock API is not configured.</p>
             <p className="text-xs opacity-90">
-              No Adobe Stock API credentials are configured, so live asset data can't be shown. The search is
-              generating official stock.adobe.com result links for “{links.query}” — use the buttons below to open
-              Adobe's own result pages in a new tab. Add a free Adobe Stock API key to enable live results.
+              Configure Adobe Stock API credentials to display asset previews. Set <code>ADOBE_STOCK_API_KEY</code> (a
+              free key from developer.adobe.com) in <code>server/.env</code>, then restart the server. Until then,
+              asset previews cannot be shown — use the buttons below to open Adobe&apos;s own result pages for “{links.query}”.
             </p>
           </div>
         </div>

@@ -44,6 +44,8 @@ export interface AdobeStockDataProvider {
   fetchCreatorAssets(params: FetchCreatorAssetsParams): Promise<CreatorAssetsResult>;
   /** Keyword (Asset/Title) search over the Adobe Stock catalog. */
   searchAssets(params: AssetSearchParams): Promise<AssetSearchResult>;
+  /** Search for assets visually similar to an asset ID (Adobe `similar`). */
+  searchSimilar(assetId: string, params: AssetSearchParams): Promise<AssetSearchResult>;
   /** Single-asset lookup by media_id (Asset ID search mode). */
   searchByAssetId(assetId: string): Promise<AssetMetadataResult>;
   /** Metadata for one asset (used by the asset detail endpoint). */

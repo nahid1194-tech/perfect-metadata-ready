@@ -88,7 +88,7 @@ export function useAssetIdSearch() {
         setProvider(res.provider);
         if (res.mode === 'link') {
           setSourceStatus('unavailable');
-          setSourceMessage('API not connected. Live asset data requires an Adobe Stock API key.');
+          setSourceMessage('Adobe Stock API is not configured.');
           setPhase('loaded');
         }
       })

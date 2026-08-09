@@ -10,6 +10,7 @@ import {
   buildAdobeStockApiHeaders,
   buildAdobeStockApiLicenseHistoryUrl,
   buildAdobeStockApiSearchUrl,
+  buildAdobeStockApiSimilarUrl,
   fetchAdobeStockLicenseHistory,
   fetchAdobeStockSearch,
   resolveApiOrder,
@@ -257,6 +258,46 @@ export class AdobeStockApiProvider {
     return this.getAssetMetadata(assetId);
   }
 
+  /**
+   * Search for assets visually similar to a given asset ID using Adobe's
+   * documented `search_parameters[similar]` parameter. Mirrors searchAssets
+   * in result shape and error handling.
+   */
+  async searchSimilar(assetId: string, params: AssetSearchParams): Promise<AssetSearchResult> {
+    if (!config.adobeApi.clientId) {
+      return assetSearchEmpty(params, 'unavailable', SETUP_MESSAGE, this.name);
+    }
+
+    const options = this.requestOptions();
+    const url = buildAdobeStockApiSimilarUrl(options, { assetId, ...params });
+    const headers = buildAdobeStockApiHeaders(options.credentials);
+    const fetched = await fetchAdobeStockSearch(url, headers, options.timeoutMs);
+
+    if (fetched.status !== 'ok') {
+      return assetSearchFromApiFailure(params, fetched);
+    }
+
+    const files = fetched.data.files ?? [];
+    let assets = files.map((file) => mapFileToAsset(file, ''));
+    if (isPopularityOrder(resolveAssetApiOrder(params.sort))) {
+      assets = withPopularity(assets, fetched.data.nb_results ?? files.length);
+    }
+    const total = typeof fetched.data.nb_results === 'number' ? fetched.data.nb_results : null;
+    const hasMore = total !== null ? params.page * params.limit < total : assets.length >= params.limit;
+
+    return {
+      query: String(assetId),
+      assets,
+      total,
+      page: params.page,
+      pageSize: params.limit,
+      hasMore,
+      source: assets.length === 0 ? 'empty' : 'ok',
+      notice: API_NOTICE,
+      provider: this.name,
+    };
+  }
+
   async getAssetMetadata(assetId: string): Promise<AssetMetadataResult> {
     if (!config.adobeApi.clientId) {
       return {
@@ -317,10 +358,45 @@ function withPopularity(assets: AdobeStockAsset[], total: number): AdobeStockAss
 }
 
 function mapFileToAsset(file: AdobeStockApiFile, creatorId: string): AdobeStockAsset {
+  const thumbnail1000 = file.thumbnail_1000_url ?? null;
+  const thumbnail500 = file.thumbnail_500_url ?? null;
+  const thumbnailUrl = file.thumbnail_url ?? null;
   return {
     id: file.id !== undefined ? String(file.id) : '',
     title: file.title ?? null,
-    thumbnail: file.thumbnail_url ?? null,
+    // Priority: thumbnail_1000_url → thumbnail_500_url → thumbnail_url
+    // (largest available preview first). Only Adobe's own URLs are used;
+    // nothing is constructed manually.
+    thumbnail: thumbnail1000 ?? thumbnail500 ?? thumbnailUrl,
+    thumbnail500,
+    thumbnailUrl,
+    thumbnail1000,
+    thumbnailWidth: typeof file.thumbnail_width === 'number' ? file.thumbnail_width : null,
+    thumbnailHeight: typeof file.thumbnail_height === 'number' ? file.thumbnail_height : null,
+    thumbnail1000Width: typeof file.thumbnail_1000_width === 'number' ? file.thumbnail_1000_width : null,
+    thumbnail1000Height: typeof file.thumbnail_1000_height === 'number' ? file.thumbnail_1000_height : null,
+    thumbnail110Url: file.thumbnail_110_url ?? null,
+    thumbnail160Url: file.thumbnail_160_url ?? null,
+    thumbnail240Url: file.thumbnail_240_url ?? null,
+    hasReleases: typeof file.has_releases === 'boolean' ? file.has_releases : null,
+    compUrl: file.comp_url ?? null,
+    isLicensed: typeof file.is_licensed === 'boolean' ? file.is_licensed : null,
+    framerate: typeof file.framerate === 'number' ? file.framerate : null,
+    duration: typeof file.duration === 'number' ? file.duration : null,
+    sizeBytes: typeof file.size_bytes === 'number' ? file.size_bytes : null,
+    premiumLevelId: typeof file.premium_level_id === 'number' ? file.premium_level_id : null,
+    isLoop: typeof file.is_loop === 'boolean' ? file.is_loop : null,
+    videoPreviewUrl: file.video_preview_url ?? null,
+    videoSmallPreviewUrl: file.video_small_preview_url ?? null,
+    marketingText: file.marketing_text ?? null,
+    countryName: file.country_name ?? null,
+    iconOption: file.icon_option === undefined ? null : file.icon_option,
+    templateTypeId: typeof file.template_type_id === 'number' ? file.template_type_id : null,
+    templateCategoryIds: Array.isArray(file.template_category_ids)
+      ? file.template_category_ids
+          .map((t) => (typeof t?.name === 'string' ? t.name : ''))
+          .filter((name) => name.length > 0)
+      : null,
     assetUrl: file.details_url ?? null,
     creatorId,
     creatorName: file.creator_name ?? null,
@@ -329,6 +405,8 @@ function mapFileToAsset(file: AdobeStockApiFile, creatorId: string): AdobeStockA
         ? file.keywords.map((k) => (typeof k?.name === 'string' ? k.name : '')).filter((name) => name.length > 0)
         : null,
     contentType: mapContentType(file),
+    vectorType: file.vector_type ?? null,
+    isPremium: typeof file.is_premium === 'boolean' ? file.is_premium : null,
     downloads: null,
     createdAt: null,
     // The API only orders by "undiscovered"; it cannot tell us an asset is
@@ -338,7 +416,7 @@ function mapFileToAsset(file: AdobeStockApiFile, creatorId: string): AdobeStockA
     width: typeof file.width === 'number' ? file.width : null,
     height: typeof file.height === 'number' ? file.height : null,
     category: typeof file.category === 'string' ? file.category : file.category && typeof file.category === 'object' ? file.category.name ?? null : null,
-    categoryHierarchy: typeof file.category_hierarchy === 'string' ? file.category_hierarchy : null,
+    categoryHierarchy: formatCategoryHierarchy(file.category_hierarchy),
     description: file.description ?? null,
     isTransparent: typeof file.is_transparent === 'boolean' ? file.is_transparent : null,
     isGenerativeAI: typeof file.is_gentech === 'boolean' ? file.is_gentech : null,
@@ -349,19 +427,41 @@ function mapFileToAsset(file: AdobeStockApiFile, creatorId: string): AdobeStockA
   };
 }
 
-/** Best-effort content-type mapping based on the fields the API returns. */
+/**
+ * Adobe returns `category_hierarchy` as an ordered array of { name } objects
+ * (broadest category first) or, occasionally, a pre-formatted string.
+ * Normalize to a single "Broad / Narrow / Narrowest" path when possible.
+ */
+function formatCategoryHierarchy(hierarchy: AdobeStockApiFile['category_hierarchy']): string | null {
+  if (typeof hierarchy === 'string' && hierarchy.trim() !== '') return hierarchy;
+  if (Array.isArray(hierarchy)) {
+    const names = hierarchy
+      .map((entry) => (entry && typeof entry === 'object' && 'name' in entry ? String((entry as { name?: unknown }).name ?? '') : ''))
+      .filter((name) => name.length > 0);
+    return names.length > 0 ? names.join(' / ') : null;
+  }
+  return null;
+}
+
+/**
+ * Best-effort content-type mapping based on the fields the API returns.
+ *
+ * Adobe's documented media_type_id enum is 1=photo, 2=illustration,
+ * 3=vector, 4=video, 6=3D, 7=template. The MIME `content_type` is used as a
+ * tiebreaker for values Adobe may omit.
+ */
 function mapContentType(file: AdobeStockApiFile): ContentType {
   const mediaType = file.media_type_id;
   const ct = (file.content_type ?? '').toLowerCase();
 
-  if (mediaType === 2 || ct.includes('video')) return 'video';
-  if (mediaType === 3 || ct.includes('template')) return 'template';
-  if (mediaType === 4 || ct.includes('3d')) return '3d';
+  if (mediaType === 4 || ct.includes('video')) return 'video';
+  if (mediaType === 7 || ct.includes('template')) return 'template';
+  if (mediaType === 6 || ct.includes('3d')) return '3d';
   if (mediaType === 5 || ct.includes('audio')) return 'audio';
 
-  if (file.vector_type) return 'vector';
-  if (ct.includes('illustrator') || ct.includes('photoshop')) return 'illustration';
-  if (ct.includes('tiff') || ct.includes('jpeg') || ct.includes('png')) return 'photo';
+  if (mediaType === 3 || file.vector_type) return 'vector';
+  if (mediaType === 2 || ct.includes('illustrator') || ct.includes('photoshop')) return 'illustration';
+  if (mediaType === 1 || ct.includes('tiff') || ct.includes('jpeg') || ct.includes('png')) return 'photo';
   return 'unknown';
 }
 

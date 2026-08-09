@@ -193,8 +193,56 @@ export interface AdobeStockAsset {
   /** Unique asset identifier. Only populated when the source provides one. */
   id: string;
   title: string | null;
-  /** Direct thumbnail image URL, when the source exposes one. */
+  /**
+   * Best available direct thumbnail URL, resolved server-side in priority
+   * order: thumbnail_500_url → thumbnail_url → thumbnail_1000_url. Never
+   * constructed manually — always one of Adobe's own URLs.
+   */
   thumbnail: string | null;
+  /** Adobe's 500px thumbnail URL, when the source exposes it. */
+  thumbnail500: string | null;
+  /** Adobe's default thumbnail URL, when the source exposes it. */
+  thumbnailUrl: string | null;
+  /** Adobe's 1000px thumbnail URL, when the source exposes it. */
+  thumbnail1000: string | null;
+  /** Pixel dimensions of the default thumbnail, when the source exposes them. */
+  thumbnailWidth: number | null;
+  thumbnailHeight: number | null;
+  /** Pixel dimensions of the 1000px thumbnail, when the source exposes them. */
+  thumbnail1000Width: number | null;
+  thumbnail1000Height: number | null;
+  /** Smaller preview tiers, when the source exposes them. */
+  thumbnail110Url: string | null;
+  thumbnail160Url: string | null;
+  thumbnail240Url: string | null;
+  /** Model/property release flag, when the source exposes it. */
+  hasReleases: boolean | null;
+  /** Direct compile/download URL, when the source exposes it. */
+  compUrl: string | null;
+  /** Whether the authenticated user has licensed this asset (requires auth). */
+  isLicensed: boolean | null;
+  /** Video frame rate (fps), when the source exposes it. */
+  framerate: number | null;
+  /** Video duration in seconds, when the source exposes it. */
+  duration: number | null;
+  /** File size in bytes, when the source exposes it. */
+  sizeBytes: number | null;
+  /** Premium tier ID, when the source exposes it. */
+  premiumLevelId: number | null;
+  /** Whether a video loops, when the source exposes it. */
+  isLoop: boolean | null;
+  /** Video preview URLs, when the source exposes them. */
+  videoPreviewUrl: string | null;
+  videoSmallPreviewUrl: string | null;
+  /** Marketing copy, when the source exposes it. */
+  marketingText: string | null;
+  /** Production country, when the source exposes it. */
+  countryName: string | null;
+  /** Icon/asset option, when the source exposes it. */
+  iconOption: boolean | number | string | null;
+  /** Template type / category IDs, when the source exposes them. */
+  templateTypeId: number | null;
+  templateCategoryIds: string[] | null;
   /** Link to view the asset on Adobe Stock. */
   assetUrl: string | null;
   creatorId: string;
@@ -203,6 +251,10 @@ export interface AdobeStockAsset {
   /** Upstream keyword tags, when the source exposes them. */
   keywords: string[] | null;
   contentType: ContentType;
+  /** Vector subtype ("zip" / "svg") when the source exposes it. Null otherwise. */
+  vectorType: string | null;
+  /** Premium-collection flag, when the source exposes it. Null otherwise. */
+  isPremium: boolean | null;
   /** Exact download count, only when the source exposes it reliably. Null otherwise. */
   downloads: number | null;
   /** ISO date string of the creation/upload date, when available. Null otherwise. */

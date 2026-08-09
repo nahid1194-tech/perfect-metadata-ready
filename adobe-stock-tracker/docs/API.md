@@ -22,6 +22,35 @@ Liveness check.
 
 ---
 
+## `GET /api/adobe/search`
+
+Primary Creator ID search endpoint used by the frontend dashboard. Calls the
+official Adobe Stock Search API from the backend (never the browser), then
+returns normalized asset data.
+
+### Query parameters
+
+| Name | Type | Default | Allowed |
+| --- | --- | --- | --- |
+| `creatorId` | string | — | Numeric Adobe Stock contributor ID (required) |
+| `filter` | string | `all` | `all`, `downloaded`, `undiscovered`, `recent`, `transparent`, `vector` |
+| `sort` | string | `downloads-desc` | `downloads-desc`, `downloads-asc`, `creation-desc`, `creation-asc` |
+| `contentType` | string | `all` | `all`, `photo`, `illustration`, `vector`, `video`, `template`, `3d` |
+| `page` | int | `1` | `1` – `100000` |
+| `limit` | int | `100` | `1` – `100` |
+
+The backend sends `search_parameters[creator_id]`, `limit`, `offset`
+(= `(page-1) × limit`) with the `x-api-key` / `x-product` headers; the API key
+never reaches the frontend. Successful results are also recorded in the local
+history index (same behavior as `/api/creator/:creatorId/assets`).
+
+### Response
+
+Same shape as `/api/creator/:creatorId/assets` (below), i.e.
+`{ creatorId, assets, total, page, pageSize, hasMore, source, sourceMessage?, notice?, provider? }`.
+
+---
+
 ## `GET /api/creator/:creatorId/assets`
 
 Fetch assets for a numeric Adobe Stock contributor ID.

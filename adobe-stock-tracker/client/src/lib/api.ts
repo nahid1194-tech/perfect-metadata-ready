@@ -16,15 +16,29 @@ import {
   type HistoryRange,
   type KeywordAnalyticsResponse,
   type LicenseHistoryResponse,
+  type SettingsResponse,
   type SummaryResponse,
+  type TestConnectionResponse,
 } from '@/types';
 
 const BASE = '/api';
 
-async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+interface RequestOptions {
+  signal?: AbortSignal;
+  method?: string;
+  body?: string;
+}
+
+async function request<T>(path: string, init?: RequestOptions | AbortSignal): Promise<T> {
+  const options: RequestOptions = init instanceof AbortSignal ? { signal: init } : (init ?? {});
+
   let response: Response;
   try {
-    response = await fetch(`${BASE}${path}`, { signal });
+    response = await fetch(`${BASE}${path}`, {
+      method: options.method ?? 'GET',
+      body: options.body,
+      signal: options.signal,
+    });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       throw error;
@@ -50,14 +64,14 @@ async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 export function fetchCreatorAssets(creatorId: string, query: AssetQuery, signal?: AbortSignal): Promise<CreatorAssetsResponse> {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ creatorId });
   if (query.filter) params.set('filter', query.filter);
   if (query.sort) params.set('sort', query.sort);
   if (query.contentType) params.set('contentType', query.contentType);
   if (query.page) params.set('page', String(query.page));
   if (query.limit) params.set('limit', String(query.limit));
   const qs = params.toString();
-  return request<CreatorAssetsResponse>(`/creator/${encodeURIComponent(creatorId)}/assets${qs ? `?${qs}` : ''}`, signal);
+  return request<CreatorAssetsResponse>(`/adobe/search${qs ? `?${qs}` : ''}`, signal);
 }
 
 export function fetchCreatorStats(creatorId: string, signal?: AbortSignal): Promise<CreatorStats> {
@@ -84,6 +98,20 @@ export function fetchAssetSearch(
   if (options.limit) params.set('limit', String(options.limit));
   const qs = params.toString();
   return request<AssetSearchResponse>(`/search/assets?${qs}`, signal);
+}
+
+export function fetchSimilarAssets(
+  assetId: string,
+  options: { filter?: AssetSearchFilter; sort?: AssetSearchSort; page?: number; limit?: number },
+  signal?: AbortSignal,
+): Promise<AssetSearchResponse> {
+  const params = new URLSearchParams({ assetId });
+  if (options.filter) params.set('filter', options.filter);
+  if (options.sort) params.set('sort', options.sort);
+  if (options.page) params.set('page', String(options.page));
+  if (options.limit) params.set('limit', String(options.limit));
+  const qs = params.toString();
+  return request<AssetSearchResponse>(`/adobe/similar${qs ? `?${qs}` : ''}`, signal);
 }
 
 export function fetchAssetMetadata(assetId: string, signal?: AbortSignal): Promise<AssetMetadataResponse> {
@@ -126,4 +154,12 @@ export function fetchLicenseHistory(
   if (options.limit) params.set('limit', String(options.limit));
   const qs = params.toString();
   return request<LicenseHistoryResponse>(`/license-history${qs ? `?${qs}` : ''}`, signal);
+}
+
+export function fetchSettings(signal?: AbortSignal): Promise<SettingsResponse> {
+  return request<SettingsResponse>('/settings', signal);
+}
+
+export function testApiConnection(signal?: AbortSignal): Promise<TestConnectionResponse> {
+  return request<TestConnectionResponse>('/settings/test-connection', { method: 'POST', signal });
 }

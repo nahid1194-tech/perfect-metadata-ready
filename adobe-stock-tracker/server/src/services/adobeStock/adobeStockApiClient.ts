@@ -38,12 +38,15 @@ export interface AdobeStockApiFile {
   thumbnail_url?: string;
   thumbnail_500_url?: string;
   thumbnail_1000_url?: string;
+  thumbnail_width?: number;
+  thumbnail_height?: number;
   details_url?: string;
   content_type?: string;
   media_type_id?: number;
   vector_type?: string | null;
   width?: number;
   height?: number;
+  is_premium?: boolean;
   category?: { id?: number; name?: string } | string | null;
   category_hierarchy?: unknown;
   description?: string;
@@ -51,6 +54,38 @@ export interface AdobeStockApiFile {
   is_gentech?: boolean;
   /** Array of { name } keyword objects, when the `keywords` result column is requested. */
   keywords?: Array<{ name?: string }>;
+  /** Asset production country, when the `country_name` column is requested. */
+  country_name?: string;
+  /** Smaller preview tiers, when the corresponding result columns are requested. */
+  thumbnail_110_url?: string;
+  thumbnail_160_url?: string;
+  thumbnail_240_url?: string;
+  thumbnail_1000_width?: number;
+  thumbnail_1000_height?: number;
+  /** Whether the asset has model/property releases (when requested). */
+  has_releases?: boolean;
+  /** Direct compile/download URL (when requested). */
+  comp_url?: string;
+  comp_width?: number;
+  comp_height?: number;
+  /** Whether the authenticated user has licensed this asset (requires auth header). */
+  is_licensed?: boolean;
+  /** Frame rate for videos, in frames per second. */
+  framerate?: number;
+  /** Video duration in seconds. */
+  duration?: number;
+  template_type_id?: number;
+  template_category_ids?: Array<{ id?: number; name?: string }>;
+  /** Marketing copy, when the `marketing_text` column is requested. */
+  marketing_text?: string;
+  /** File size in bytes, when the `size_bytes` column is requested. */
+  size_bytes?: number;
+  premium_level_id?: number;
+  /** Whether a video loops. */
+  is_loop?: boolean;
+  video_preview_url?: string;
+  video_small_preview_url?: string;
+  icon_option?: boolean | number | string;
   // License History fields (present in the LicenseHistory response only).
   /** License type ("Standard", "Extended", "Video_HD", …). */
   license?: string;
@@ -118,7 +153,9 @@ export interface AdobeStockApiAssetIdQuery {
 const CONTENT_TYPE_PARAMS: Record<Exclude<ContentType, 'unknown' | 'audio'>, string> = {
   photo: 'content_type:photo',
   illustration: 'content_type:illustration',
-  vector: 'content_type:vector',
+  // Vectors are delivered as Illustrator AI / EPS files wrapped in a zip;
+  // Adobe documents this filter as content_type:zip_vector.
+  vector: 'content_type:zip_vector',
   video: 'content_type:video',
   template: 'content_type:template',
   '3d': 'content_type:3d',
@@ -174,8 +211,17 @@ export function isCharacteristicAssetFilter(filter: AssetSearchFilter): boolean 
   return filter === 'transparent' || filter === 'ai';
 }
 
-/** Result columns the dashboard requests from the Search API. */
+/**
+ * Result columns the dashboard requests from the Search API.
+ *
+ * This is the full set of useful, documented fields. `is_licensed` is the only
+ * exception: Adobe documents it as requiring an authentication header, so it
+ * is only requested when an OAuth access token is configured (see
+ * pushResultColumns). Requesting it without auth is pointless and can cause a
+ * rejected request.
+ */
 const REQUESTED_COLUMNS = [
+  'nb_results',
   'id',
   'title',
   'creator_id',
@@ -183,6 +229,13 @@ const REQUESTED_COLUMNS = [
   'thumbnail_url',
   'thumbnail_500_url',
   'thumbnail_1000_url',
+  'thumbnail_width',
+  'thumbnail_height',
+  'thumbnail_110_url',
+  'thumbnail_160_url',
+  'thumbnail_240_url',
+  'thumbnail_1000_width',
+  'thumbnail_1000_height',
   'details_url',
   'content_type',
   'media_type_id',
@@ -191,14 +244,41 @@ const REQUESTED_COLUMNS = [
   'height',
   'category',
   'category_hierarchy',
+  'country_name',
   'description',
   'is_transparent',
   'is_gentech',
+  'is_premium',
+  'has_releases',
+  'comp_url',
+  'comp_width',
+  'comp_height',
+  'framerate',
+  'duration',
+  'is_loop',
+  'video_preview_url',
+  'video_small_preview_url',
+  'template_type_id',
+  'template_category_ids',
+  'marketing_text',
+  'size_bytes',
+  'premium_level_id',
+  'icon_option',
   'keywords',
 ];
 
 function push(params: Array<[string, string]>, name: string, value: string | number): void {
   params.push([name, String(value)]);
+}
+
+/** Append the requested result columns, plus `is_licensed` only with auth. */
+function pushResultColumns(params: Array<[string, string]>, options: AdobeStockApiRequestOptions): void {
+  for (const column of REQUESTED_COLUMNS) {
+    push(params, 'result_columns[]', column);
+  }
+  if (options.credentials.accessToken) {
+    push(params, 'result_columns[]', 'is_licensed');
+  }
 }
 
 /**
@@ -227,9 +307,7 @@ export function buildAdobeStockApiSearchUrl(options: AdobeStockApiRequestOptions
     push(params, 'search_parameters[filters][transparent]', 'true');
   }
 
-  for (const column of REQUESTED_COLUMNS) {
-    push(params, 'result_columns[]', column);
-  }
+  pushResultColumns(params, options);
 
   const queryString = params.map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join('&');
   return `${options.baseUrl}?${queryString}`;
@@ -266,9 +344,7 @@ export function buildAdobeStockApiAssetSearchUrl(
     }
   }
 
-  for (const column of REQUESTED_COLUMNS) {
-    push(params, 'result_columns[]', column);
-  }
+  pushResultColumns(params, options);
 
   const queryString = params.map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join('&');
   return `${options.baseUrl}?${queryString}`;
@@ -288,9 +364,54 @@ export function buildAdobeStockApiAssetIdUrl(options: AdobeStockApiRequestOption
   push(params, 'search_parameters[offset]', 0);
   push(params, 'search_parameters[filters][premium]', 'false');
 
-  for (const column of REQUESTED_COLUMNS) {
-    push(params, 'result_columns[]', column);
+  pushResultColumns(params, options);
+
+  const queryString = params.map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join('&');
+  return `${options.baseUrl}?${queryString}`;
+}
+
+export interface AdobeStockApiSimilarQuery {
+  /** The asset to find visually similar assets for. */
+  assetId: string;
+  filter: AssetSearchFilter;
+  sort: AssetSearchSort;
+  page: number;
+  limit: number;
+}
+
+/**
+ * Build the Search/Files query URL for a similarity search.
+ *
+ * Adobe's documented `search_parameters[similar]` parameter accepts an asset
+ * (media) ID and returns visually similar assets. Uses the same correctness
+ * rules as the other builders (percent-encoding, filters[premium]=false
+ * pagination fix, documented order values only).
+ */
+export function buildAdobeStockApiSimilarUrl(
+  options: AdobeStockApiRequestOptions,
+  query: AdobeStockApiSimilarQuery,
+): string {
+  const params: Array<[string, string]> = [];
+
+  push(params, 'locale', options.locale);
+  push(params, 'search_parameters[similar]', query.assetId);
+  push(params, 'search_parameters[limit]', query.limit);
+  push(params, 'search_parameters[offset]', (query.page - 1) * query.limit);
+  push(params, 'search_parameters[order]', resolveAssetApiOrder(query.sort));
+  push(params, 'search_parameters[filters][premium]', 'false');
+
+  for (const type of resolveAssetContentTypeParams(query.filter)) {
+    push(params, `search_parameters[filters][${type}]`, 1);
   }
+  if (isCharacteristicAssetFilter(query.filter)) {
+    if (query.filter === 'transparent') {
+      push(params, 'search_parameters[filters][transparent]', 'true');
+    } else if (query.filter === 'ai') {
+      push(params, 'search_parameters[filters][gentech]', 'true');
+    }
+  }
+
+  pushResultColumns(params, options);
 
   const queryString = params.map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`).join('&');
   return `${options.baseUrl}?${queryString}`;
@@ -400,28 +521,30 @@ export async function fetchAdobeStockSearchOnce(
     }
 
     if (response.status === 429) {
-      return { status: 'rate_limited', statusCode: 429, message: body?.error ?? 'Adobe Stock API rate-limited the request.' };
+      return { status: 'rate_limited', statusCode: 429, message: 'Adobe Stock API rate limit reached.' };
     }
-    if (response.status === 401 || response.status === 403) {
-      return {
-        status: 'blocked',
-        statusCode: response.status,
-        message:
-          body?.error ??
-          (response.status === 401
-            ? 'Adobe Stock API rejected the API key (401). Check ADOBE_API_CLIENT_ID.'
-            : 'Adobe Stock API denied the request (403). Check the configured API key/permissions.'),
-      };
+    if (response.status === 401) {
+      return { status: 'blocked', statusCode: 401, message: 'Adobe Stock API authentication failed.' };
+    }
+    if (response.status === 403) {
+      return { status: 'blocked', statusCode: 403, message: 'Adobe Stock API access denied.' };
     }
     if (!response.ok) {
       return {
         status: 'error',
         statusCode: response.status,
-        message: typeof body?.error === 'string' && body.error ? body.error : `Adobe Stock API returned HTTP ${response.status}.`,
+        message:
+          response.status >= 500
+            ? 'Adobe Stock API temporarily unavailable.'
+            : `Adobe Stock API returned HTTP ${response.status}.`,
       };
     }
     if (!body || typeof body !== 'object') {
       return { status: 'error', statusCode: response.status, message: 'Adobe Stock API returned an unexpected response.' };
+    }
+
+    if (config.adobeApi.debug) {
+      logAdobeResponseDebug(response.status, url, body);
     }
 
     return { status: 'ok', data: body };
@@ -429,7 +552,7 @@ export async function fetchAdobeStockSearchOnce(
     if (error instanceof Error && error.name === 'AbortError') {
       return { status: 'timeout' };
     }
-    return { status: 'error', message: 'Could not reach the Adobe Stock API.' };
+    return { status: 'error', message: 'Unable to connect to Adobe Stock API.' };
   } finally {
     clearTimeout(timer);
   }
@@ -479,4 +602,29 @@ export async function fetchAdobeStockLicenseHistory(
   timeoutMs: number,
 ): Promise<AdobeStockApiSearchResult> {
   return fetchAdobeStockSearch(url, headers, timeoutMs);
+}
+
+/**
+ * Debug helper (enabled with ADOBE_STOCK_DEBUG=true): logs the raw Adobe
+ * response surface — total results and, per returned file, which thumbnail /
+ * core fields Adobe actually populated. Used to confirm the real field names
+ * before mapping; never sends API keys or response bodies to the client.
+ */
+function logAdobeResponseDebug(status: number, url: string, body: AdobeStockApiSearchResponse): void {
+  const files = body.files ?? [];
+  const kind = url.includes('LicenseHistory') ? 'LicenseHistory' : 'Search';
+  console.log(`[adobe-stock:debug] ${kind} HTTP ${status} nb_results=${body.nb_results ?? '?'} files=${files.length}`);
+  for (const file of files.slice(0, 5)) {
+    const hasThumbnails = {
+      thumbnail_url: Boolean(file.thumbnail_url),
+      thumbnail_500_url: Boolean(file.thumbnail_500_url),
+      thumbnail_1000_url: Boolean(file.thumbnail_1000_url),
+    };
+    console.log(
+      `[adobe-stock:debug]   file id=${file.id ?? '?'} fields=${JSON.stringify(hasThumbnails)} ` +
+        `title=${Boolean(file.title)} creator_name=${Boolean(file.creator_name)} ` +
+        `details_url=${Boolean(file.details_url)} content_type=${Boolean(file.content_type)} ` +
+        `keywords=${Array.isArray(file.keywords) ? file.keywords.length : '?'}`,
+    );
+  }
 }

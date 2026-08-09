@@ -34,6 +34,7 @@ import {
   modelListFor,
   refreshProviderModels,
 } from "@/lib/models";
+import { GEMINI_MULTI_MODEL_FALLBACK } from "@/lib/model-catalog";
 import { backoffDelayMs } from "@/lib/rate-limiter";
 import { autoPushAfterGeneration } from "@/lib/git-sync";
 import type {
@@ -97,10 +98,12 @@ function providerLabel(provider: ApiProvider): string {
 const PROVIDER_ORDER: ApiProvider[] = ["gemini", "openai", "mistral"];
 
 function currentModel(provider: ApiProvider): string {
+  if (provider === "gemini") return GEMINI_MULTI_MODEL_FALLBACK[0] ?? "";
   return modelListFor(provider)[0] ?? "";
 }
 
 function modelChoices(provider: ApiProvider): string[] {
+  if (provider === "gemini") return GEMINI_MULTI_MODEL_FALLBACK;
   return modelListFor(provider);
 }
 
@@ -269,6 +272,7 @@ async function generateWithKeys(
       maskKey(key.key)
     );
 
+    modelLoop:
     for (const model of models) {
       console.log(`[${provider}] Using model ${model}`);
       updateDebug(provider, keyIndex, keys.length, model, maskKey(key.key));
@@ -286,6 +290,55 @@ async function generateWithKeys(
           return result;
         } catch (error) {
           if (signal.aborted) throw error;
+
+          if (isNetworkError(error) && networkRetries < 2) {
+            networkRetries++;
+            await sleepCancellable(1000, signal);
+            continue;
+          }
+          if (isInvalidImageError(error)) throw error;
+
+          // Gemini multi-model fallback: on quota exhaustion (HTTP 429) or any
+          // model failure, retry the next model using the current key before
+          // moving to the next key. Only key-level failures skip to the next key.
+          if (provider === "gemini") {
+            if (isRateLimited(error)) {
+              const until = Date.now() + rateLimitDelayMs(error);
+              sawRateLimit = true;
+              waitUntil = Math.min(waitUntil, until);
+              applyGenerationFailure(key.id, error);
+              console.warn(
+                `[Gemini] Model ${model} quota exhausted or rate-limited (${maskKey(key.key)}), retrying with the next model`
+              );
+              continue modelLoop;
+            }
+            if (isModelUnavailable(error)) {
+              sawModelUnavailable = true;
+              nonRateLimitError ??= error;
+              applyGenerationFailure(key.id, error);
+              console.warn(
+                `[Gemini] Model ${model} unavailable (${maskKey(key.key)}), retrying with the next model`
+              );
+              continue modelLoop;
+            }
+            if (isKeyFailure(error)) {
+              nonRateLimitError ??= error;
+              applyGenerationFailure(key.id, error);
+              console.warn(
+                `[Gemini] API key ${maskKey(key.key)} failed, moving to the next key`
+              );
+              if (keyIndex < orderedKeys.length - 1) {
+                notifyApiKeySwitch(provider, keyIndex + 1);
+              }
+              continue keyLoop;
+            }
+            nonRateLimitError ??= error;
+            console.warn(
+              `[Gemini] Model ${model} failed (${maskKey(key.key)}), retrying with the next model`
+            );
+            continue modelLoop;
+          }
+
           if (isRateLimited(error)) {
             const until = Date.now() + rateLimitDelayMs(error);
             sawRateLimit = true;
@@ -309,12 +362,6 @@ async function generateWithKeys(
             );
             break;
           }
-          if (isNetworkError(error) && networkRetries < 2) {
-            networkRetries++;
-            await sleepCancellable(1000, signal);
-            continue;
-          }
-          if (isInvalidImageError(error)) throw error;
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
             applyGenerationFailure(key.id, error);

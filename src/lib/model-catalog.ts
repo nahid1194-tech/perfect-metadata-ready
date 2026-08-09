@@ -1,5 +1,12 @@
 import type { ApiProvider } from "@/lib/types";
 
+export const GEMINI_MULTI_MODEL_FALLBACK = [
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
+  "gemini-1.5-pro",
+];
+
 export const FALLBACK_MODELS: Record<ApiProvider, string[]> = {
   gemini: [
     "gemini-2.5-pro",

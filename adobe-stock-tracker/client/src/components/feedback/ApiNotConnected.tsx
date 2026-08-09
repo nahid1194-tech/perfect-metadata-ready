@@ -8,9 +8,10 @@ interface ApiNotConnectedProps {
 }
 
 /**
- * Shown when no official Adobe Stock API credentials are configured. The
- * dashboard runs in search-link mode: it never fetches data and never
- * fabricates numbers — it only opens Adobe's own search pages.
+ * Shown when ADOBE_STOCK_API_KEY is not configured. Live asset previews
+ * cannot be displayed without credentials, so the app shows an honest setup
+ * message and falls back to opening Adobe's own search pages — it never
+ * fabricates assets.
  */
 export function ApiNotConnected({ links }: ApiNotConnectedProps) {
   return (
@@ -18,11 +19,11 @@ export function ApiNotConnected({ links }: ApiNotConnectedProps) {
       <div className="flex items-start gap-2.5">
         <Unplug className="mt-0.5 size-4 shrink-0" />
         <div className="space-y-1">
-          <p className="font-medium">API not connected — search-link mode is active</p>
+          <p className="font-medium">Adobe Stock API is not configured.</p>
           <p className="text-xs opacity-90">
-            No Adobe Stock API credentials are configured, so live asset data can't be shown. The dashboard is
-            generating official stock.adobe.com search links for contributor #{links.creatorId} — use the buttons below
-            to open Adobe's own result pages in a new tab. Add a free Adobe Stock API key to enable the full dashboard.
+            Configure Adobe Stock API credentials to display asset previews. Set <code>ADOBE_STOCK_API_KEY</code> (a
+            free key from developer.adobe.com) in <code>server/.env</code>, then restart the server. Until then, asset
+            previews cannot be shown — use the button to open contributor #{links.creatorId} on Adobe&apos;s own site.
           </p>
         </div>
       </div>

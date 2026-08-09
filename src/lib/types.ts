@@ -41,7 +41,8 @@ export type GenerationStatus =
   | "generating"
   | "retrying"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type QueueState = "idle" | "running" | "paused" | "stopped";
 

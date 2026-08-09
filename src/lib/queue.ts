@@ -574,11 +574,14 @@ async function recoveryProbeLoop(): Promise<void> {
   recoveryProbeRunning = false;
 }
 
-async function processOne(image: ImageAsset, force = false): Promise<boolean> {
+async function processOne(
+  image: ImageAsset,
+  force = false
+): Promise<"success" | "failed" | "cancelled"> {
   const store = useAppStore.getState();
   if (!store.images.some((item) => item.id === image.id)) {
     store.removeQueueItem(image.id);
-    return false;
+    return "cancelled";
   }
 
   const controller = new AbortController();
@@ -646,25 +649,34 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
     const aborted =
       controller.signal.aborted ||
       (error instanceof Error && error.name === "AbortError");
-    const message = aborted ? "Cancelled" : friendlyApiError(error);
-    useAppStore.getState().patchQueueItem(image.id, {
-      status: "failed",
-      error: message,
-      progress: 0,
-      startedAt: undefined,
-      statusMessage: null,
-    });
-    if (error instanceof NoActiveKeyError) {
-      pauseRequested = true;
-      useAppStore.getState().setQueueState("paused");
-      toast(
-        "error",
-        "No active API key available.",
-        "Add or enable an API key, then resume the queue."
-      );
+    if (aborted) {
+      useAppStore.getState().patchQueueItem(image.id, {
+        status: "cancelled",
+        error: null,
+        progress: 0,
+        startedAt: undefined,
+        statusMessage: null,
+      });
+    } else {
+      useAppStore.getState().patchQueueItem(image.id, {
+        status: "failed",
+        error: friendlyApiError(error),
+        progress: 0,
+        startedAt: undefined,
+        statusMessage: null,
+      });
+      if (error instanceof NoActiveKeyError) {
+        pauseRequested = true;
+        useAppStore.getState().setQueueState("paused");
+        toast(
+          "error",
+          "No active API key available.",
+          "Add or enable an API key, then resume the queue."
+        );
+      }
     }
     activeControllers.delete(image.id);
-    return false;
+    return aborted ? "cancelled" : "failed";
   }
 
   clearInterval(ticker);
@@ -694,7 +706,7 @@ async function processOne(image: ImageAsset, force = false): Promise<boolean> {
   });
 
   activeControllers.delete(image.id);
-  return true;
+  return "success";
 }
 
 export async function runQueue(
@@ -757,13 +769,13 @@ export async function runQueue(
   const failed: string[] = [];
 
   const processTracked = async (image: ImageAsset): Promise<void> => {
-    const ok = await processOne(image);
+    const outcome = await processOne(image);
     completed++;
-    if (ok) {
+    if (outcome === "success") {
       success++;
       const index = failed.indexOf(image.id);
       if (index !== -1) failed.splice(index, 1);
-    } else if (!failed.includes(image.id)) {
+    } else if (outcome === "failed" && !failed.includes(image.id)) {
       failed.push(image.id);
     }
     store.setFailedImageIds([...failed]);
@@ -814,6 +826,7 @@ export async function runQueue(
     await Promise.all(workers);
   };
 
+  const targetIds = new Set(targets.map((image) => image.id));
   await runConcurrent(targets);
 
   const cancelled = stopRequested;
@@ -822,6 +835,28 @@ export async function runQueue(
   stopRequested = false;
   pauseRequested = false;
   activeControllers.clear();
+
+  let stoppedCount = 0;
+  if (cancelled) {
+    const finalStore = useAppStore.getState();
+    for (const id of targetIds) {
+      const item = finalStore.queueItems[id];
+      if (!item) continue;
+      if (item.status === "cancelled") {
+        stoppedCount++;
+        continue;
+      }
+      if (item.status === "completed" || item.status === "failed") continue;
+      stoppedCount++;
+      finalStore.patchQueueItem(id, {
+        status: "cancelled",
+        error: null,
+        progress: 0,
+        startedAt: undefined,
+        statusMessage: null,
+      });
+    }
+  }
 
   store.setQueueState("idle");
   store.setGenerating(false);
@@ -843,7 +878,7 @@ export async function runQueue(
     toast(
       "info",
       "Generation stopped",
-      `${success} result${success === 1 ? "" : "s"} ready, ${failed.length} failed.`
+      `${success} result${success === 1 ? "" : "s"} ready${stoppedCount > 0 ? `, ${stoppedCount} stopped` : ""}${failed.length > 0 ? `, ${failed.length} failed` : ""}.`
     );
   } else if (failed.length === 0) {
     toast(
@@ -936,10 +971,13 @@ export async function retryImage(imageId: string): Promise<void> {
 
   try {
     store.setActiveImageId(imageId);
-    const ok = await processOne(image, true);
-    if (!ok) {
+    const outcome = await processOne(image, true);
+    if (outcome !== "success") {
       const item = useAppStore.getState().queueItems[imageId];
-      throw new Error(item?.error ?? "Generation failed.");
+      throw new Error(
+        item?.error ??
+          (outcome === "cancelled" ? "Generation stopped." : "Generation failed.")
+      );
     }
   } finally {
     active = false;

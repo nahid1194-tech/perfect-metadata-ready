@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Download, Loader2, RotateCcw, Trash2, UploadCloud, WandSparkles } from "lucide-react"
+import { Download, Loader2, RotateCcw, Square, Trash2, UploadCloud, WandSparkles } from "lucide-react"
 
 import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
 import { pushToGitHub } from "@/lib/git-sync"
@@ -251,6 +251,18 @@ export function UploadToolbar() {
             )}
             Push to GitHub
           </Button>
+
+          {generating ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-red-400/40 bg-red-500/15 text-red-100 hover:bg-red-500/25 hover:text-white"
+              onClick={stop}
+            >
+              <Square className="size-3.5" />
+              Stop
+            </Button>
+          ) : null}
 
           <Button
             size="sm"

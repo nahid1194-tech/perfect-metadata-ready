@@ -362,13 +362,6 @@ function mulberry32(seed: number) {
   };
 }
 
-function slugify(name: string): string {
-  return name
-    .replace(/\.[^/.]+$/, "")
-    .replace(/[_\-\s]+/g, " ")
-    .trim();
-}
-
 function capitalize(value: string): string {
   return value.replace(/\b\w/g, (char) => char.toUpperCase());
 }
@@ -488,11 +481,9 @@ function buildShutterstock(
   };
 }
 
-function buildMetadata(image: ImageAsset, seed: number): GeneratedMetadata {
+function buildMetadata(_image: ImageAsset, seed: number): GeneratedMetadata {
   const rand = mulberry32(seed);
-  const subject =
-    slugify(image.name).split(" ").slice(0, 3).join(" ") || "untitled subject";
-  const titleBase = capitalize(subject);
+  const titleBase = "Digital Stock Image";
   const mood = moods[Math.floor(rand() * moods.length)];
   const lighting = lightings[Math.floor(rand() * lightings.length)];
   const style = styles[Math.floor(rand() * styles.length)];
@@ -620,7 +611,9 @@ function enforceKeywords(values: string[], pool: string[], target: number): stri
   const seen = new Set<string>();
   const out: string[] = [];
   for (const value of values) {
-    const clean = value.replace(/,/g, "").replace(/\s+/g, " ").trim();
+    const clean = stripFilenameTokens(
+      value.replace(/,/g, "").replace(/\s+/g, " ").trim()
+    );
     const key = clean.toLowerCase();
     if (!clean || key.length < 3) continue;
     if (seen.has(key)) continue;
@@ -629,7 +622,9 @@ function enforceKeywords(values: string[], pool: string[], target: number): stri
     if (out.length >= target) break;
   }
   for (const value of pool) {
-    const clean = value.replace(/,/g, "").replace(/\s+/g, " ").trim();
+    const clean = stripFilenameTokens(
+      value.replace(/,/g, "").replace(/\s+/g, " ").trim()
+    );
     const key = clean.toLowerCase();
     if (!clean || key.length < 3) continue;
     if (seen.has(key)) continue;
@@ -743,6 +738,18 @@ export function generateLocal(
   };
 }
 
+function stripFilenameTokens(value: string): string {
+  return value
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, " ")
+    .replace(/\b[0-9a-f]{16,}\b/gi, " ")
+    .replace(/\b\d{13,}\b/g, " ")
+    .replace(/\b(?:uuid|random[\s_-]?id|asset[\s_-]?id|file[\s_-]?name)\b/gi, " ")
+    .replace(/\b(?:img|image|photo|pic|png|jpg)[-_]?\d{4,}\b/gi, " ")
+    .replace(/\b(?=[a-z0-9]*\d)[a-z0-9]{12,}\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function sanitizeKeywords(
   value: unknown,
   max: number,
@@ -751,7 +758,7 @@ function sanitizeKeywords(
   const cleaned = Array.isArray(value)
     ? value
         .map(String)
-        .map((keyword) => keyword.replace(/,/g, "").trim())
+        .map((keyword) => stripFilenameTokens(keyword.replace(/,/g, "").trim()))
         .filter(Boolean)
     : [];
   const out: string[] = [];
@@ -794,8 +801,8 @@ function normalize(
         ? normalizeShutterstockCategories(rawCategory).join(", ")
         : fallback.category;
 
-  const title = String(value.title ?? "").trim();
-  const description = String(value.description ?? "").trim();
+  const title = stripFilenameTokens(String(value.title ?? "").trim());
+  const description = stripFilenameTokens(String(value.description ?? "").trim());
   const adobeTitle =
     format === "adobe"
       ? title.replace(/,/g, " ").replace(/\s+/g, " ").trim()
@@ -946,7 +953,12 @@ const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
   (c) => c.label
 ).join(", ");
 
-const SINGLE_SHOT_PROMPT = `You are an expert Adobe Stock and Shutterstock metadata generator. Before writing anything, analyze the ENTIRE image thoroughly: main subject, secondary subjects, objects, people and their actions, environment, context, style, medium, design type, colors, composition, orientation, background, lighting, visual concepts, and every clearly visible detail. Only describe what is visually or contextually supported. Never invent objects, text, logos, brands, people's names, or other copyrighted content.
+const SINGLE_SHOT_PROMPT = `You are an expert Adobe Stock and Shutterstock metadata generator. Before writing anything, analyze the ENTIRE image thoroughly: main subject, secondary subjects, objects, people and their actions, environment, context, style, medium, design type, colors, composition, orientation, perspective, background, lighting, materials, visual concepts, and every clearly visible detail. Only describe what is visually or contextually supported. Never invent objects, text, logos, brands, people's names, or other copyrighted content.
+
+FILENAME
+- The uploaded filename is NOT a source of information and must be completely ignored. Never infer or borrow the subject, title, keywords, description, or category from the filename or any of its parts (including UUIDs, hashes, random IDs, or timestamps).
+- Never echo, repeat, or include the filename or any word/token from it anywhere in the output.
+- Base every decision ONLY on the image pixels and the VERIFIED BACKGROUND FACTS below.
 
 Reply with ONLY this exact JSON (no markdown, no comments, no extra fields):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
@@ -991,6 +1003,7 @@ OTHER
 - Keep the VERIFIED BACKGROUND FACTS accurate: never claim a white, transparent, black, or isolated background unless the facts confirm it.
 
 FINAL SELF-CHECK before outputting:
+- Is everything based on what is actually visible in the image, with the filename completely ignored (no filename words, UUIDs, hashes, random IDs, or timestamps anywhere)?
 - Does the title accurately describe the image, stay within the character limit, end on a complete word, and read naturally (not a keyword list)?
 - Are the first 5-10 keywords the strongest and most searchable high-intent terms?
 - Is there a balanced mix of primary keywords, long-tail phrases, and technical/style terms (no keyword stuffing)?

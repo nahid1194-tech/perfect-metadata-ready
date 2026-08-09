@@ -4,6 +4,7 @@ import { memo } from "react"
 import { motion } from "framer-motion"
 import {
   AlertTriangle,
+  Ban,
   Clock,
   FileImage,
   Loader2,
@@ -49,6 +50,10 @@ const STATUS_META: Record<GenerationStatus, { label: string; className: string }
   failed: {
     label: "Failed",
     className: "bg-destructive/15 text-destructive",
+  },
+  cancelled: {
+    label: "Stopped",
+    className: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
   },
 };
 
@@ -153,7 +158,15 @@ export const PendingImageCard = memo(function PendingImageCard({
               </Badge>
             </div>
 
-            {item.statusMessage ? (
+            {item.status === "cancelled" ? (
+              <div className="flex items-start gap-1.5 rounded-lg border border-muted bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <Ban className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0">
+                  Generation stopped. Remove this file or press Generate to try
+                  again.
+                </span>
+              </div>
+            ) : item.statusMessage ? (
               <div className="flex items-start gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
                 <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin" />
                 <span className="min-w-0">{item.statusMessage}</span>

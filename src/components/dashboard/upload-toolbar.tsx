@@ -50,6 +50,7 @@ export function UploadToolbar() {
   const images = useAppStore((state) => state.images);
   const selectedIds = useAppStore((state) => state.selectedIds);
   const results = useAppStore((state) => state.results);
+  const queueItems = useAppStore((state) => state.queueItems);
   const failedImageIds = useAppStore((state) => state.failedImageIds);
   const platform = useAppStore((state) => state.settings.platform);
   const progress = useAppStore((state) => state.progress);
@@ -77,10 +78,13 @@ export function UploadToolbar() {
 
   const uploaded = images.length;
   const completedCount = Math.min(uploaded, results.length);
+  const generatingCount = Object.values(queueItems).filter((item) =>
+    ["analyzing", "generating", "retrying"].includes(item.status)
+  ).length;
   const failedCount = failedImageIds.length;
   const remainingCount = Math.max(
     0,
-    uploaded - completedCount - failedCount
+    uploaded - completedCount - failedCount - generatingCount
   );
   const progressPct =
     uploaded > 0 ? Math.round((results.length / uploaded) * 100) : 0;
@@ -284,9 +288,10 @@ export function UploadToolbar() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         <StatTile label="Uploaded" value={uploaded} />
         <StatTile label="Completed" value={completedCount} accent />
+        <StatTile label="Generating" value={generatingCount} />
         <StatTile label="Failed" value={failedCount} />
         <StatTile label="Remaining" value={remainingCount} />
         <StatTile label="Progress" value={`${Math.min(100, progressPct)}%`} />

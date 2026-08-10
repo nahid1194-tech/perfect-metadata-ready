@@ -4,6 +4,7 @@ import type {
   GeneratedMetadata,
   GenerationResult,
   GenerationSettings,
+  ImageAnalysis,
   ImageAsset,
   StockMetadata,
 } from "@/lib/types";
@@ -26,6 +27,16 @@ import {
 } from "@/lib/background";
 import { imageContentHash } from "@/lib/cache";
 import { createProfiler, logProfile } from "@/lib/perf";
+import { stripFilenameTokens } from "@/lib/filename";
+import {
+  buildAnalysisPrompt,
+  buildMetadataPrompt,
+  buildRefinePrompt,
+  EMPTY_ANALYSIS,
+  extractJson,
+  parseAnalysis,
+} from "@/lib/prompts";
+import { validateGeneratedMetadata } from "@/lib/metadata-validator";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -773,18 +784,6 @@ export function generateLocal(
   };
 }
 
-function stripFilenameTokens(value: string): string {
-  return value
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, " ")
-    .replace(/\b[0-9a-f]{16,}\b/gi, " ")
-    .replace(/\b\d{13,}\b/g, " ")
-    .replace(/\b(?:uuid|random[\s_-]?id|asset[\s_-]?id|file[\s_-]?name)\b/gi, " ")
-    .replace(/\b(?:img|image|photo|pic|png|jpg)[-_]?\d{4,}\b/gi, " ")
-    .replace(/\b(?=[a-z0-9]*\d)[a-z0-9]{12,}\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function sanitizeKeywords(
   value: unknown,
   max: number,
@@ -990,95 +989,6 @@ export async function testMistralConnection(apiKey: string): Promise<number> {
   return Array.isArray(json?.data) ? json.data.length : 0;
 }
 
-const ADOBE_CATEGORY_GUIDE = ADOBE_CATEGORIES.map(
-  (c) => `${c.id} ${c.label}`
-).join(", ");
-const SHUTTERSTOCK_CATEGORY_GUIDE = SHUTTERSTOCK_CATEGORIES.map(
-  (c) => c.label
-).join(", ");
-
-const SINGLE_SHOT_PROMPT = `You are an expert Adobe Stock and Shutterstock metadata generator. Before writing anything, analyze the ENTIRE image thoroughly: main subject, secondary subjects, objects, people and their actions, environment, context, style, medium, design type, colors, composition, orientation, perspective, background, lighting, materials, visual concepts, and every clearly visible detail. Only describe what is visually or contextually supported. Never invent objects, text, logos, brands, people's names, or other copyrighted content.
-
-FILENAME
-- The uploaded filename is NOT a source of information and must be completely ignored. Never infer or borrow the subject, title, keywords, description, or category from the filename or any of its parts (including UUIDs, hashes, random IDs, or timestamps).
-- Never echo, repeat, or include the filename or any word/token from it anywhere in the output.
-- Base every decision ONLY on the image pixels and the VERIFIED BACKGROUND FACTS below.
-
-Reply with ONLY this exact JSON (no markdown, no comments, no extra fields):
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}
-
-TITLE
-- Natural, specific, professional English. NEVER a comma-separated list of keywords and NEVER keyword-stuffed.
-- Structure when appropriate: [Main Subject] + [Action/Context] + [Style/Design Type] + [Color/Composition] + [Utility/Use Case].
-- Focus on the subject, style, and utility (e.g. "for branding", "for web design", "for social media") so buyers understand what the asset is and how to use it.
-- Keep titles concise and under 70 characters (Adobe Stock limit), descriptive, and SEO-friendly.
-- Put the primary subject and primary concept in the FIRST 4-7 words whenever possible.
-- Examples:
-  BAD: "Vector icon, agriculture, plant, leaf, green, logo design"
-  GOOD: "Minimalist vector icon of a green plant sprout for agriculture branding"
-  BAD: "Car, sports car, old car, vintage, fast"
-  GOOD: "Classic vintage sports car parked in a studio with a clean minimalist background"
-- Must NEVER exceed the character limit in USER PREFERENCES and must ALWAYS end on a complete word. If the title is too long, rewrite it shorter and more concisely — never cut or truncate a word.
-- Do NOT repeat the same concept unnecessarily and do NOT add anything that cannot be confirmed from the image.
-- adobe.title: no commas.
-
-KEYWORDS
-- Provide EXACTLY the count specified in USER PREFERENCES for BOTH adobe.keywords and shutterstock.keywords (Adobe Stock allows up to 49 keywords, Shutterstock up to 50).
-- RELEVANCE AND ACCURACY COME FIRST: never add an irrelevant term just to reach the count; instead find genuinely specific, useful terms (subject details, actions, important objects, style, medium, colors, composition, background, context, commercial concepts).
-- WORD-LENGTH LIMIT: every single keyword must be ONE word or a natural TWO-word phrase. NEVER output a keyword with more than two words. If you start with a longer phrase, split it into the strongest 1-2 word keywords based on what is actually visible (e.g. "business abstract poster" → "business poster", "abstract poster"; "minimal corporate business design" → "minimal design", "corporate design", "business design"). Drop weak combinations instead of padding.
-- Multi-word keywords must be natural, specific search phrases (e.g. "business poster", "blue background", "abstract design", "corporate template") — never keyword stuffing or random word pairs.
-- Build a BALANCED mix of three types: (1) primary subject keywords, (2) descriptive two-word phrases such as "vector illustration" or "transparent background", and (3) technical/style terms such as "vector", "icon", "isolated", "template", "minimalist", "flat design", "line art".
-- Use high-intent identifiers ONLY when they accurately describe the asset: "vector", "isolated", "template", "minimalist", "white background", "transparent background", "PNG", "icon", "logo", "banner", "background", "web design", "branding".
-- Order strictly by search importance: the FIRST 5-10 keywords must be the strongest, most searchable high-intent terms a buyer would type (primary subject first, then action/context, important objects, style/medium, main concepts, secondary concepts, color, composition/background, commercial concepts). Do NOT shuffle them randomly.
-- Complete, correctly spelled words or short phrases; prefer singular where natural; no duplicates or near-duplicates; no truncated words.
-- Drop generic filler (beautiful, photo, image, high quality, concept, design...) UNLESS the VERIFIED BACKGROUND FACTS explicitly require a specific background term such as "white background", "black background", or "transparent background".
-- Never use brands, logos, trademarks, artist names, or unrelated trending terms.
-
-CONSISTENCY
-- The title and keywords must describe the SAME image. Never write a title about one concept and keywords about another. Every major concept in the title must be supported by the image and reflected in the keywords.
-
-CATEGORY
-- adobe.category: the single numeric ID whose label best fits the actual asset type and subject (never choose a category just because it is common), from this list (ID Label): {ADOBE}
-- shutterstock.category: 1-2 exact official category names that match the asset, from this list: {SS}
-
-SHUTTERSTOCK DESCRIPTION
-- 1-2 factual sentences (subject, setting, action, mood); no marketing language.
-
-OTHER
-- gender, ethnicity, age, and profession terms ONLY when clearly visible.
-- Keep the VERIFIED BACKGROUND FACTS accurate: never claim a white, transparent, black, or isolated background unless the facts confirm it.
-
-FINAL SELF-CHECK before outputting:
-- Is everything based on what is actually visible in the image, with the filename completely ignored (no filename words, UUIDs, hashes, random IDs, or timestamps anywhere)?
-- Does the title accurately describe the image, stay within the character limit, end on a complete word, and read naturally (not a keyword list)?
-- Are the first 5-10 keywords the strongest and most searchable high-intent terms?
-- Is there a balanced mix of primary keywords, two-word phrases, and technical/style terms (no keyword stuffing)?
-- Are high-intent identifiers like "vector", "isolated", "template", "minimalist", or "transparent background" included ONLY when accurate?
-- Is the keyword count exactly as requested, with no duplicates, no truncated words, and nothing irrelevant?
-- Does EVERY keyword contain 2 words or fewer, with any longer phrase split into strong 1-2 word keywords?
-- Is the background stated correctly and is the category correct?
-- Did you invent anything? Would a real buyer searching for this exact asset find these terms useful?
-Fix anything that fails.`;
-
-function buildSingleShotPrompt(
-  settings: GenerationSettings,
-  bgRules: string
-): string {
-  const base = SINGLE_SHOT_PROMPT.replace("{ADOBE}", ADOBE_CATEGORY_GUIDE).replace(
-    "{SS}",
-    SHUTTERSTOCK_CATEGORY_GUIDE
-  );
-  return `${base}
-
-VERIFIED BACKGROUND FACTS (from pixel analysis - keep consistent):
-${bgRules}
-
-USER PREFERENCES:
-- ${buildSettingsPrompt(settings)}
-
-Return ONLY the JSON.`;
-}
-
 function parseMetadata(text: string): {
   adobe?: unknown;
   shutterstock?: unknown;
@@ -1092,6 +1002,27 @@ function parseMetadata(text: string): {
   } catch {
     return null;
   }
+}
+
+const ANALYSIS_MAX_RETRIES = 2;
+const REFINE_MAX_ROUNDS = 2;
+
+function mergeRefinedMetadata(
+  current: GeneratedMetadata,
+  refined: {
+    adobe?: unknown;
+    shutterstock?: unknown;
+  } | null
+): GeneratedMetadata {
+  if (!refined) return current;
+  return {
+    adobe: normalize(refined.adobe, current.adobe, "adobe"),
+    shutterstock: normalize(
+      refined.shutterstock,
+      current.shutterstock,
+      "shutterstock"
+    ),
+  };
 }
 
 type PreparedAnalysis = {
@@ -1144,19 +1075,38 @@ async function runGenerationPipeline(args: {
   image: ImageAsset;
   fallback: GeneratedMetadata;
   settings: GenerationSettings;
-  call: (prompt: string) => Promise<string>;
+  platform: "adobe" | "shutterstock";
+  call: (prompt: string, includeImage?: boolean) => Promise<string>;
 }): Promise<GeneratedMetadata> {
-  const { image, fallback, settings, call } = args;
+  const { image, fallback, settings, platform, call } = args;
   const profiler = createProfiler();
 
   const { background } = await getPreparedAnalysis(image);
   const bgRules = backgroundRules(background);
-  const prompt = buildSingleShotPrompt(settings, bgRules);
 
-  profiler.start("request");
-  const raw = await call(prompt);
-  profiler.end("request");
+  // Stage 1: deep multi-pass visual analysis (reuses the prepared image).
+  profiler.start("analysis");
+  let analysis: ImageAnalysis = EMPTY_ANALYSIS;
+  for (let attempt = 0; attempt < ANALYSIS_MAX_RETRIES; attempt++) {
+    const analysisPrompt = buildAnalysisPrompt({ bgRules });
+    const analysisRaw = await call(analysisPrompt, true);
+    const parsed = parseAnalysis(analysisRaw);
+    if (parsed) {
+      analysis = parsed;
+      break;
+    }
+  }
+  profiler.end("analysis");
 
+  // Stage 2: generate metadata from the analysis (per marketplace focus).
+  profiler.start("generate");
+  const metadataPrompt = buildMetadataPrompt({
+    settings,
+    bgRules,
+    analysis,
+    platform,
+  });
+  const raw = await call(metadataPrompt, true);
   const parsed = parseMetadata(raw);
   if (!parsed) {
     console.warn(
@@ -1165,8 +1115,7 @@ async function runGenerationPipeline(args: {
     return fallback;
   }
 
-  profiler.start("normalize");
-  const metadata: GeneratedMetadata = {
+  let metadata: GeneratedMetadata = {
     adobe: normalize(parsed.adobe, fallback.adobe, "adobe"),
     shutterstock: normalize(
       parsed.shutterstock,
@@ -1174,52 +1123,43 @@ async function runGenerationPipeline(args: {
       "shutterstock"
     ),
   };
-  profiler.end("normalize");
+  profiler.end("generate");
+
+  // Stage 3: application-side validation.
+  let report = validateGeneratedMetadata(metadata, settings);
+
+  // Stage 4: targeted refinement of failing components only.
+  for (
+    let round = 0;
+    round < REFINE_MAX_ROUNDS && report.errors.length > 0;
+    round++
+  ) {
+    const refinePrompt = buildRefinePrompt({
+      settings,
+      bgRules,
+      analysis,
+      metadata,
+      issues: report.errors,
+      platform,
+    });
+    const refinedRaw = await call(refinePrompt, false);
+    const refined = parseMetadata(refinedRaw);
+    if (!refined) break;
+    metadata = mergeRefinedMetadata(metadata, refined);
+    report = validateGeneratedMetadata(metadata, settings);
+  }
+
+  if (report.errors.length > 0) {
+    console.warn(
+      `[Generate] Metadata quality issues remaining after refinement:`,
+      report.errors.map(
+        (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+      )
+    );
+  }
+
   logProfile(`${image.name}:generate`, profiler.result());
   return metadata;
-}
-
-function buildSettingsPrompt(settings: GenerationSettings): string {
-  const adobeTitleMax = Math.min(settings.titleLength, ADOBE_TITLE_MAX);
-  const shutterstockTitleMax = Math.min(
-    settings.titleLength,
-    SHUTTERSTOCK_TITLE_MAX
-  );
-  const adobeKeywordCount = Math.max(
-    1,
-    Math.min(settings.keywordCount, ADOBE_KEYWORDS_MAX)
-  );
-  const shutterstockKeywordCount = Math.max(
-    SHUTTERSTOCK_KEYWORDS_MIN,
-    Math.min(settings.keywordCount, SHUTTERSTOCK_KEYWORDS_MAX)
-  );
-  const parts: string[] = [
-    `Title length: exactly ${adobeTitleMax} characters or fewer for adobe.title and exactly ${shutterstockTitleMax} characters or fewer for shutterstock.title. Never exceed the limit and always end on a complete word; if too long, rewrite the title shorter.`,
-    `Keywords: adobe.keywords must contain EXACTLY ${adobeKeywordCount} unique keywords and shutterstock.keywords must contain EXACTLY ${shutterstockKeywordCount} unique keywords.`,
-    `Description: up to ${settings.descriptionLength} characters.`,
-  ];
-  if (settings.enablePrefix && settings.prefix.trim()) {
-    parts.push(`Prefix every title with: "${settings.prefix.trim()}"`);
-  }
-  if (settings.enableSuffix && settings.suffix.trim()) {
-    parts.push(`Suffix every title with: "${settings.suffix.trim()}"`);
-  }
-  if (settings.enableNegativeTitleWords && settings.negativeTitleWords.trim()) {
-    parts.push(`Never use in titles: ${settings.negativeTitleWords.trim()}`);
-  }
-  if (settings.enableNegativeKeywords && settings.negativeKeywords.trim()) {
-    parts.push(`Never use as keywords: ${settings.negativeKeywords.trim()}`);
-  }
-  return parts.join("\n- ");
-}
-
-function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) return fenced[1];
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end > start) return text.slice(start, end + 1);
-  return text;
 }
 
 async function callGemini(
@@ -1308,8 +1248,9 @@ export async function generateWithApi(
     image,
     fallback,
     settings: fullSettings,
-    call: async (prompt) => {
-      const parts = await analysisImageParts(image);
+    platform: fullSettings.platform,
+    call: async (prompt, includeImage = true) => {
+      const parts = includeImage ? await analysisImageParts(image) : [];
       parts.push({ text: prompt });
       return callGemini(parts, apiKey, model, 0.3, signal);
     },
@@ -1406,11 +1347,15 @@ export async function generateWithOpenAI(
     image,
     fallback,
     settings: fullSettings,
-    call: async (prompt) => {
-      const { dataUrl, mimeType } = await getPreparedAnalysis(image);
-      const imageUrl = dataUrl.startsWith("data:")
-        ? dataUrl
-        : `data:${mimeType};base64,${dataUrl}`;
+    platform: fullSettings.platform,
+    call: async (prompt, includeImage = true) => {
+      let imageUrl: string | undefined;
+      if (includeImage) {
+        const { dataUrl, mimeType } = await getPreparedAnalysis(image);
+        imageUrl = dataUrl.startsWith("data:")
+          ? dataUrl
+          : `data:${mimeType};base64,${dataUrl}`;
+      }
       return callOpenAI(prompt, imageUrl, apiKey, model, 0.3, signal);
     },
   });
@@ -1505,11 +1450,15 @@ export async function generateWithMistral(
     image,
     fallback,
     settings: fullSettings,
-    call: async (prompt) => {
-      const { dataUrl, mimeType } = await getPreparedAnalysis(image);
-      const imageUrl = dataUrl.startsWith("data:")
-        ? dataUrl
-        : `data:${mimeType};base64,${dataUrl}`;
+    platform: fullSettings.platform,
+    call: async (prompt, includeImage = true) => {
+      let imageUrl: string | undefined;
+      if (includeImage) {
+        const { dataUrl, mimeType } = await getPreparedAnalysis(image);
+        imageUrl = dataUrl.startsWith("data:")
+          ? dataUrl
+          : `data:${mimeType};base64,${dataUrl}`;
+      }
       return callMistral(prompt, imageUrl, apiKey, model, 0.3, signal);
     },
   });

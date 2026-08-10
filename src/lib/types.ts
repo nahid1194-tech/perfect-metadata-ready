@@ -224,3 +224,33 @@ export type GitPushFile = {
   path: string;
   content: string;
 };
+
+export type ImageAnalysis = {
+  assetType: string;
+  orientation: "horizontal" | "vertical" | "square" | "unknown";
+  composition: string;
+  background: string;
+  primarySubject: string;
+  primaryDetails: string;
+  secondarySubjects: string[];
+  visualDetails: string[];
+  concepts: string[];
+  visibleText: string[];
+  colors: string[];
+  summary: string;
+};
+
+export type ValidationComponent =
+  | "title"
+  | "description"
+  | "keywords"
+  | "category";
+
+export type ValidationSeverity = "error" | "warning";
+
+export type ValidationIssue = {
+  format: CsvFormat;
+  component: ValidationComponent;
+  severity: ValidationSeverity;
+  message: string;
+};

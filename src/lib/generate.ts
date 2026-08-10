@@ -375,16 +375,29 @@ const styles = [
   "hyper-detailed digital painting",
 ];
 
-const conceptKeywords = [
-  "high resolution",
-  "professional",
-  "sharp focus",
-  "commercial photography",
-  "colorful",
-  "creative",
-  "detailed",
-  "visually appealing",
-];
+function splitKeywordPhrase(phrase: string): string[] {
+  const words = phrase.replace(/,/g, "").split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  if (words.length === 1) return [words[0]];
+  if (words.length === 2) return [words.join(" ").trim()];
+  const head = words[words.length - 1];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(value);
+  };
+  push(head);
+  for (let i = 0; i < words.length - 1; i++) {
+    push(`${words[i]} ${head}`);
+  }
+  for (let i = 0; i < words.length - 1; i++) {
+    push(words[i]);
+  }
+  return out;
+}
 
 function buildKeywords(
   titleBase: string,
@@ -394,19 +407,20 @@ function buildKeywords(
   style: string,
   max: number
 ): string[] {
-  const pool = [
-    ...titleBase.split(" "),
-    categoryLabel,
-    mood,
-    lighting,
-    style,
-    ...conceptKeywords,
-  ];
+  const pool = [titleBase, categoryLabel, mood, lighting, style];
   const out: string[] = [];
-  for (const item of pool) {
+  const seen = new Set<string>();
+  const push = (item: string) => {
     const clean = item.toLowerCase().replace(/,/g, "").trim();
-    if (clean && !out.includes(clean)) out.push(clean);
-    if (out.length >= max) break;
+    if (!clean || seen.has(clean)) return;
+    seen.add(clean);
+    out.push(clean);
+  };
+  for (const item of pool) {
+    for (const candidate of splitKeywordPhrase(item)) {
+      push(candidate);
+      if (out.length >= max) return out;
+    }
   }
   return out;
 }
@@ -603,36 +617,53 @@ function buildKeywordPool(meta: StockMetadata): string[] {
     ...meta.title.split(/\s+/),
     ...(meta.description ? meta.description.split(/\s+/) : []),
     ...categoryLabelWords(meta.category),
-    ...conceptKeywords,
   ];
 }
 
 function enforceKeywords(values: string[], pool: string[], target: number): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const value of values) {
+  const push = (item: string) => {
     const clean = stripFilenameTokens(
-      value.replace(/,/g, "").replace(/\s+/g, " ").trim()
+      item.replace(/,/g, "").replace(/\s+/g, " ").trim()
     );
     const key = clean.toLowerCase();
-    if (!clean || key.length < 3) continue;
-    if (seen.has(key)) continue;
+    if (!clean || key.length < 3 || seen.has(key)) return;
     seen.add(key);
     out.push(clean);
+  };
+  for (const value of values) {
+    for (const candidate of splitKeywordPhrase(value)) {
+      push(candidate);
+      if (out.length >= target) break;
+    }
     if (out.length >= target) break;
   }
   for (const value of pool) {
-    const clean = stripFilenameTokens(
-      value.replace(/,/g, "").replace(/\s+/g, " ").trim()
-    );
-    const key = clean.toLowerCase();
-    if (!clean || key.length < 3) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(clean);
+    for (const candidate of splitKeywordPhrase(value)) {
+      push(candidate);
+      if (out.length >= target) break;
+    }
     if (out.length >= target) break;
   }
   return out.slice(0, target);
+}
+
+function enforceTwoWordLimit(keywords: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const keyword of keywords) {
+    const replacement =
+      keyword.split(/\s+/).filter(Boolean).length > 2
+        ? splitKeywordPhrase(keyword)[0]
+        : keyword;
+    const clean = replacement.replace(/,/g, "").trim();
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
 }
 
 function applySettings(
@@ -694,10 +725,12 @@ function applySettings(
       ...metadata.adobe,
       title: fitTitleWithAffixes(cleanTitle(metadata.adobe.title), adobeTitleMax),
       description: truncateWords(metadata.adobe.description, settings.descriptionLength),
-      keywords: enforceKeywords(
-        adobeKeywords,
-        buildKeywordPool(metadata.adobe),
-        adobeKeywordCount
+      keywords: enforceTwoWordLimit(
+        enforceKeywords(
+          adobeKeywords,
+          buildKeywordPool(metadata.adobe),
+          adobeKeywordCount
+        )
       ),
     },
     shutterstock: {
@@ -710,10 +743,12 @@ function applySettings(
         metadata.shutterstock.description,
         Math.min(settings.descriptionLength, SHUTTERSTOCK_TITLE_MAX)
       ),
-      keywords: enforceKeywords(
-        shutterstockKeywords,
-        buildKeywordPool(metadata.shutterstock),
-        shutterstockKeywordCount
+      keywords: enforceTwoWordLimit(
+        enforceKeywords(
+          shutterstockKeywords,
+          buildKeywordPool(metadata.shutterstock),
+          shutterstockKeywordCount
+        )
       ),
     },
   };
@@ -755,21 +790,30 @@ function sanitizeKeywords(
   max: number,
   fallback: string[]
 ): string[] {
-  const cleaned = Array.isArray(value)
-    ? value
-        .map(String)
-        .map((keyword) => stripFilenameTokens(keyword.replace(/,/g, "").trim()))
-        .filter(Boolean)
-    : [];
   const out: string[] = [];
-  for (const keyword of cleaned) {
-    if (!out.includes(keyword)) out.push(keyword);
+  const seen = new Set<string>();
+  const push = (keyword: string) => {
+    const clean = stripFilenameTokens(keyword.replace(/,/g, "").trim());
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) return;
+    seen.add(key);
+    out.push(clean);
+  };
+  const source = Array.isArray(value) ? value.map(String) : [];
+  for (const keyword of source) {
+    for (const candidate of splitKeywordPhrase(keyword)) {
+      push(candidate);
+      if (out.length >= max) break;
+    }
     if (out.length >= max) break;
   }
   if (out.length < SHUTTERSTOCK_KEYWORDS_MIN) {
     for (const keyword of fallback) {
+      for (const candidate of splitKeywordPhrase(keyword)) {
+        push(candidate);
+        if (out.length >= SHUTTERSTOCK_KEYWORDS_MIN) break;
+      }
       if (out.length >= SHUTTERSTOCK_KEYWORDS_MIN) break;
-      if (!out.includes(keyword)) out.push(keyword);
     }
   }
   return out;
@@ -981,7 +1025,9 @@ TITLE
 KEYWORDS
 - Provide EXACTLY the count specified in USER PREFERENCES for BOTH adobe.keywords and shutterstock.keywords (Adobe Stock allows up to 49 keywords, Shutterstock up to 50).
 - RELEVANCE AND ACCURACY COME FIRST: never add an irrelevant term just to reach the count; instead find genuinely specific, useful terms (subject details, actions, important objects, style, medium, colors, composition, background, context, commercial concepts).
-- Build a BALANCED mix of three types: (1) primary subject keywords, (2) descriptive long-tail phrases such as "minimalist flat vector illustration" or "transparent background PNG", and (3) technical/style terms such as "vector", "icon", "isolated", "template", "minimalist", "flat design", "hand-drawn", "line art", "PNG".
+- WORD-LENGTH LIMIT: every single keyword must be ONE word or a natural TWO-word phrase. NEVER output a keyword with more than two words. If you start with a longer phrase, split it into the strongest 1-2 word keywords based on what is actually visible (e.g. "business abstract poster" → "business poster", "abstract poster"; "minimal corporate business design" → "minimal design", "corporate design", "business design"). Drop weak combinations instead of padding.
+- Multi-word keywords must be natural, specific search phrases (e.g. "business poster", "blue background", "abstract design", "corporate template") — never keyword stuffing or random word pairs.
+- Build a BALANCED mix of three types: (1) primary subject keywords, (2) descriptive two-word phrases such as "vector illustration" or "transparent background", and (3) technical/style terms such as "vector", "icon", "isolated", "template", "minimalist", "flat design", "line art".
 - Use high-intent identifiers ONLY when they accurately describe the asset: "vector", "isolated", "template", "minimalist", "white background", "transparent background", "PNG", "icon", "logo", "banner", "background", "web design", "branding".
 - Order strictly by search importance: the FIRST 5-10 keywords must be the strongest, most searchable high-intent terms a buyer would type (primary subject first, then action/context, important objects, style/medium, main concepts, secondary concepts, color, composition/background, commercial concepts). Do NOT shuffle them randomly.
 - Complete, correctly spelled words or short phrases; prefer singular where natural; no duplicates or near-duplicates; no truncated words.
@@ -1006,9 +1052,10 @@ FINAL SELF-CHECK before outputting:
 - Is everything based on what is actually visible in the image, with the filename completely ignored (no filename words, UUIDs, hashes, random IDs, or timestamps anywhere)?
 - Does the title accurately describe the image, stay within the character limit, end on a complete word, and read naturally (not a keyword list)?
 - Are the first 5-10 keywords the strongest and most searchable high-intent terms?
-- Is there a balanced mix of primary keywords, long-tail phrases, and technical/style terms (no keyword stuffing)?
+- Is there a balanced mix of primary keywords, two-word phrases, and technical/style terms (no keyword stuffing)?
 - Are high-intent identifiers like "vector", "isolated", "template", "minimalist", or "transparent background" included ONLY when accurate?
 - Is the keyword count exactly as requested, with no duplicates, no truncated words, and nothing irrelevant?
+- Does EVERY keyword contain 2 words or fewer, with any longer phrase split into strong 1-2 word keywords?
 - Is the background stated correctly and is the category correct?
 - Did you invent anything? Would a real buyer searching for this exact asset find these terms useful?
 Fix anything that fails.`;

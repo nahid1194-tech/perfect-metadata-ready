@@ -46,6 +46,78 @@ export type GenerationStatus =
 
 export type QueueState = "idle" | "running" | "paused" | "stopped";
 
+export type DebugStatus = {
+  activeProvider: ApiProvider | null;
+  activeKeyIndex: number | null;
+  activeKeyCount: number;
+  activeModel: string | null;
+  activeKeyMasked: string | null;
+  remainingKeys: number | null;
+  fallbackActive: boolean;
+};
+
+export type JobStatus =
+  | "queued"
+  | "processing"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export type WorkerSnapshot = {
+  jobId: string;
+  results: GenerationResult[];
+  queueItems: Record<string, QueueItem>;
+  batchTotal: number;
+  batchCompleted: number;
+  progress: number;
+  generating: boolean;
+  queueState: QueueState;
+  activeImageId: string | null;
+  failedImageIds: string[];
+  etaSeconds: number | null;
+  debugStatus: DebugStatus;
+  successOpen: boolean;
+  errorOpen: boolean;
+  apiPrepared?: Record<string, { apiDataUrl?: string; apiMimeType?: string }>;
+};
+
+export type PersistedJobImage = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  dataUrl?: string;
+  apiDataUrl?: string;
+  apiMimeType?: string;
+};
+
+export type PersistedJob = {
+  jobId: string;
+  status: JobStatus;
+  total: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  remaining: number;
+  currentImageId: string | null;
+  currentImageName: string | null;
+  progress: number;
+  results: GenerationResult[];
+  queueItems: Record<string, QueueItem>;
+  errors: Record<string, string>;
+  failedImageIds: string[];
+  images: PersistedJobImage[];
+  settings: GenerationSettings;
+  apiKeys: ApiKeyEntry[];
+  primaryProvider: ApiProvider;
+  providerModels: Record<ApiProvider, string[]>;
+  providerModelsFetchedAt: Record<ApiProvider, number | null>;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type QueueItem = {
   imageId: string;
   status: GenerationStatus;

@@ -14,6 +14,12 @@ import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 import { cn } from "@/lib/utils"
 
+const PROVIDER_LABEL: Record<string, string> = {
+  gemini: "Gemini",
+  openai: "OpenAI",
+  mistral: "Mistral AI",
+};
+
 function StatTile({
   label,
   value,
@@ -47,9 +53,11 @@ export function UploadToolbar() {
   const failedImageIds = useAppStore((state) => state.failedImageIds);
   const platform = useAppStore((state) => state.settings.platform);
   const progress = useAppStore((state) => state.progress);
+  const debugStatus = useAppStore((state) => state.debugStatus);
+  const activeImageId = useAppStore((state) => state.activeImageId);
   const gitEnabled = useAppStore((state) => state.gitConfig.enabled);
   const gitPushStatus = useAppStore((state) => state.gitPushStatus);
-  const { run, stop, generating } = useGenerate();
+  const { run, stop, generating, queueState } = useGenerate();
 
   const [scrolled, setScrolled] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -283,6 +291,30 @@ export function UploadToolbar() {
         <StatTile label="Remaining" value={remainingCount} />
         <StatTile label="Progress" value={`${Math.min(100, progressPct)}%`} />
       </div>
+
+      {generating ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-blue-100/85">
+          <span className="flex items-center gap-1.5">
+            <Loader2 className="size-3 animate-spin" />
+            Current:{" "}
+            {images.find((image) => image.id === activeImageId)?.name ??
+              "Preparing…"}
+          </span>
+          {debugStatus.activeProvider ? (
+            <span>
+              Provider:{" "}
+              {PROVIDER_LABEL[debugStatus.activeProvider] ??
+                debugStatus.activeProvider}
+            </span>
+          ) : null}
+          {debugStatus.activeModel ? (
+            <span>Model: {debugStatus.activeModel}</span>
+          ) : null}
+          {queueState === "paused" ? (
+            <span className="text-amber-300">Paused</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {progress > 0 ? (
         <Progress

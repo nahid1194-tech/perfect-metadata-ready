@@ -55,7 +55,16 @@ export class ImageTooLargeError extends Error {
   }
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+const IS_WORKER =
+  typeof document === "undefined" && typeof window === "undefined";
+
+function loadImage(src: string): Promise<HTMLImageElement | ImageBitmap> {
+  if (IS_WORKER) {
+    return (async () => {
+      const blob = await (await fetch(src)).blob();
+      return createImageBitmap(blob);
+    })();
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
@@ -65,12 +74,28 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function createCanvas(
+  width: number,
+  height: number
+): HTMLCanvasElement | OffscreenCanvas {
+  if (IS_WORKER) return new OffscreenCanvas(width, height);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
 function canvasToBlob(
-  canvas: HTMLCanvasElement,
+  canvas: HTMLCanvasElement | OffscreenCanvas,
   type: string,
   quality: number
 ): Promise<Blob | null> {
-  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  if (IS_WORKER) {
+    return (canvas as OffscreenCanvas).convertToBlob({ type, quality });
+  }
+  return new Promise((resolve) =>
+    (canvas as HTMLCanvasElement).toBlob(resolve, type, quality)
+  );
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -101,10 +126,11 @@ export async function compressImageDataUrl(
     const scale = dimension / largest;
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext("2d") as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
     if (!ctx) throw new Error("Could not initialize image compression.");
     ctx.drawImage(image, 0, 0, width, height);
 

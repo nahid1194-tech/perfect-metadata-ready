@@ -16,7 +16,16 @@ const TRANSPARENT_RATIO = 0.5;
 const NEUTRAL_RATIO = 0.6;
 const SOLID_SPREAD = 26;
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+const IS_WORKER =
+  typeof document === "undefined" && typeof window === "undefined";
+
+function loadImage(src: string): Promise<HTMLImageElement | ImageBitmap> {
+  if (IS_WORKER) {
+    return (async () => {
+      const blob = await (await fetch(src)).blob();
+      return createImageBitmap(blob);
+    })();
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
@@ -96,7 +105,9 @@ export async function detectBackground(
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
 
-    const canvas = document.createElement("canvas");
+    const canvas = IS_WORKER
+      ? new OffscreenCanvas(width, height)
+      : document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });

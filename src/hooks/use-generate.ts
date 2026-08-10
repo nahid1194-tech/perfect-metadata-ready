@@ -1,13 +1,13 @@
 "use client"
 
 import {
-  cancelImage,
-  pauseQueue,
-  resumeQueue,
-  retryImage,
-  runQueue,
-  stopQueue,
-} from "@/lib/queue";
+  cancelBackgroundImage,
+  pauseBackgroundJob,
+  resumeBackgroundQueue,
+  retryBackgroundImage,
+  startBackgroundJob,
+  stopBackgroundJob,
+} from "@/lib/background-queue";
 import { useAppStore } from "@/store/use-app-store";
 
 export function useGenerate() {
@@ -19,12 +19,12 @@ export function useGenerate() {
   const etaSeconds = useAppStore((state) => state.etaSeconds);
 
   return {
-    run: runQueue,
-    pause: pauseQueue,
-    resume: resumeQueue,
-    stop: stopQueue,
-    regenerate: retryImage,
-    cancelImage,
+    run: startBackgroundJob,
+    pause: pauseBackgroundJob,
+    resume: resumeBackgroundQueue,
+    stop: stopBackgroundJob,
+    regenerate: retryBackgroundImage,
+    cancelImage: cancelBackgroundImage,
     generating,
     queueState,
     progress,

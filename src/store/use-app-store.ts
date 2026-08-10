@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createWorkerSafeStorage } from "@/lib/worker-storage";
 import { FALLBACK_MODELS } from "@/lib/model-catalog";
 import type {
   ApiKeyEntry,
   ApiProvider,
+  DebugStatus,
   GenerationResult,
   GenerationSettings,
   GitPushStatus,
@@ -12,6 +14,7 @@ import type {
   ImageAsset,
   QueueItem,
   QueueState,
+  WorkerSnapshot,
 } from "@/lib/types";
 
 type Theme = "light" | "dark";
@@ -114,26 +117,9 @@ type AppState = {
   clearAll: () => void;
   resultCache: Record<string, GenerationResult>;
   setResultCache: (key: string, result: GenerationResult) => void;
-  debugStatus: {
-    activeProvider: ApiProvider | null;
-    activeKeyIndex: number | null;
-    activeKeyCount: number;
-    activeModel: string | null;
-    activeKeyMasked: string | null;
-    remainingKeys: number | null;
-    fallbackActive: boolean;
-  };
-  setDebugStatus: (
-    patch: Partial<{
-      activeProvider: ApiProvider | null;
-      activeKeyIndex: number | null;
-      activeKeyCount: number;
-      activeModel: string | null;
-      activeKeyMasked: string | null;
-      remainingKeys: number | null;
-      fallbackActive: boolean;
-    }>
-  ) => void;
+  debugStatus: DebugStatus;
+  setDebugStatus: (patch: Partial<DebugStatus>) => void;
+  applyWorkerSnapshot: (patch: Partial<Omit<WorkerSnapshot, "jobId">>) => void;
   gitConfig: GitSyncConfig;
   setGitConfig: (patch: Partial<GitSyncConfig>) => void;
   gitPushStatus: GitPushStatus;
@@ -338,9 +324,46 @@ export const useAppStore = create<AppState>()(
       },
       setDebugStatus: (patch) =>
         set((state) => ({ debugStatus: { ...state.debugStatus, ...patch } })),
+      applyWorkerSnapshot: (patch) =>
+        set((state) => ({
+          ...(patch.results !== undefined ? { results: patch.results } : {}),
+          ...(patch.queueItems !== undefined
+            ? { queueItems: patch.queueItems }
+            : {}),
+          ...(patch.batchTotal !== undefined
+            ? { batchTotal: patch.batchTotal }
+            : {}),
+          ...(patch.batchCompleted !== undefined
+            ? { batchCompleted: patch.batchCompleted }
+            : {}),
+          ...(patch.progress !== undefined ? { progress: patch.progress } : {}),
+          ...(patch.generating !== undefined
+            ? { generating: patch.generating }
+            : {}),
+          ...(patch.queueState !== undefined
+            ? { queueState: patch.queueState }
+            : {}),
+          ...(patch.activeImageId !== undefined
+            ? { activeImageId: patch.activeImageId }
+            : {}),
+          ...(patch.failedImageIds !== undefined
+            ? { failedImageIds: patch.failedImageIds }
+            : {}),
+          ...(patch.etaSeconds !== undefined
+            ? { etaSeconds: patch.etaSeconds }
+            : {}),
+          ...(patch.debugStatus
+            ? { debugStatus: { ...state.debugStatus, ...patch.debugStatus } }
+            : {}),
+          ...(patch.successOpen !== undefined
+            ? { successOpen: patch.successOpen }
+            : {}),
+          ...(patch.errorOpen !== undefined ? { errorOpen: patch.errorOpen } : {}),
+        })),
     }),
     {
       name: "app-storage",
+      storage: createWorkerSafeStorage(),
       partialize: (state) => ({
         theme: state.theme,
         apiKeys: state.apiKeys,

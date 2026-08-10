@@ -5,9 +5,11 @@ import { AnimatePresence, motion } from "framer-motion"
 import { Menu, X } from "lucide-react"
 
 import { ensureModelCache } from "@/lib/models"
+import { restoreBackgroundJob, type RestoredJob } from "@/lib/background-queue"
 import { ControlCard } from "@/components/dashboard/control-card"
 import { GitSyncSettings } from "@/components/dashboard/git-sync-settings"
 import { ImageUpload } from "@/components/dashboard/image-upload"
+import { InterruptedJobBanner } from "@/components/dashboard/interrupted-job-banner"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
 import { NotificationCard } from "@/components/dashboard/notification-card"
 import { ResultsSection } from "@/components/dashboard/results-section"
@@ -25,9 +27,11 @@ export function DashboardShell() {
   const setPlatform = useAppStore((state) => state.setSettings);
   const { run, pause, resume, stop, generating, queueState } = useGenerate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [restoredJob, setRestoredJob] = useState<RestoredJob | null>(null);
 
   useEffect(() => {
     void ensureModelCache();
+    setRestoredJob(restoreBackgroundJob());
   }, []);
 
   useKeyboardShortcuts({
@@ -118,6 +122,14 @@ export function DashboardShell() {
       <div className="lg:pl-[320px] xl:pl-[360px]">
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
           <NotificationCard />
+
+          {restoredJob?.interrupted ? (
+            <InterruptedJobBanner
+              job={restoredJob.job}
+              hasImages={restoredJob.hasImages}
+              onDismiss={() => setRestoredJob(null)}
+            />
+          ) : null}
 
           <Card className="rounded-[20px] shadow-sm">
             <CardHeader className="border-b pb-3">

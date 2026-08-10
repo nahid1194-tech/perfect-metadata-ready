@@ -11,7 +11,6 @@ import { GitSyncSettings } from "@/components/dashboard/git-sync-settings"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { InterruptedJobBanner } from "@/components/dashboard/interrupted-job-banner"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
-import { NotificationCard } from "@/components/dashboard/notification-card"
 import { ResultsSection } from "@/components/dashboard/results-section"
 import { UploadToolbar } from "@/components/dashboard/upload-toolbar"
 import { Button } from "@/components/ui/button"
@@ -121,8 +120,6 @@ export function DashboardShell() {
 
       <div className="lg:pl-[320px] xl:pl-[360px]">
         <main className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
-          <NotificationCard />
-
           {restoredJob?.interrupted ? (
             <InterruptedJobBanner
               job={restoredJob.job}

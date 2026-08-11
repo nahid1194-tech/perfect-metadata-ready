@@ -8,11 +8,11 @@ import type {
   ImageAsset,
   StockMetadata,
 } from "@/lib/types";
+import { devLog } from "@/lib/dev-log";
 import {
   ADOBE_CATEGORIES,
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
-  SHUTTERSTOCK_CATEGORIES,
   SHUTTERSTOCK_KEYWORDS_MAX,
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
@@ -68,6 +68,13 @@ export class NoActiveKeyError extends Error {
   constructor() {
     super("No active API key available.");
     this.name = "NoActiveKeyError";
+  }
+}
+
+export class MetadataQualityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MetadataQualityError";
   }
 }
 
@@ -353,39 +360,6 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableNegativeKeywords: false,
 };
 
-function hashString(input: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function mulberry32(seed: number) {
-  let a = seed;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function capitalize(value: string): string {
-  return value.replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-const moods = ["serene", "moody", "vibrant", "dramatic", "ethereal"];
-const lightings = ["golden hour", "studio softbox", "neon glow", "rim light"];
-const styles = [
-  "photorealistic",
-  "stylized illustration",
-  "cinematic still",
-  "hyper-detailed digital painting",
-];
-
 function splitKeywordPhrase(phrase: string): string[] {
   const words = phrase.replace(/,/g, "").split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
@@ -408,145 +382,6 @@ function splitKeywordPhrase(phrase: string): string[] {
     push(words[i]);
   }
   return out;
-}
-
-function buildKeywords(
-  titleBase: string,
-  categoryLabel: string,
-  mood: string,
-  lighting: string,
-  style: string,
-  max: number
-): string[] {
-  const pool = [titleBase, categoryLabel, mood, lighting, style];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (item: string) => {
-    const clean = item.toLowerCase().replace(/,/g, "").trim();
-    if (!clean || seen.has(clean)) return;
-    seen.add(clean);
-    out.push(clean);
-  };
-  for (const item of pool) {
-    for (const candidate of splitKeywordPhrase(item)) {
-      push(candidate);
-      if (out.length >= max) return out;
-    }
-  }
-  return out;
-}
-
-function buildAdobe(
-  titleBase: string,
-  categoryLabel: string,
-  category: string,
-  mood: string,
-  lighting: string,
-  style: string
-): StockMetadata {
-  const words = titleBase.split(" ");
-  let candidate = `${words.join(" ")} in ${style} style`;
-  while (candidate.length > ADOBE_TITLE_MAX && words.length > 1) {
-    words.pop();
-    candidate = `${words.join(" ")} in ${style} style`;
-  }
-  const title = candidate
-    .replace(/,/g, "")
-    .slice(0, ADOBE_TITLE_MAX)
-    .replace(/\s+$/, "");
-
-  const keywords = buildKeywords(
-    titleBase,
-    categoryLabel,
-    mood,
-    lighting,
-    style,
-    ADOBE_KEYWORDS_MAX
-  );
-
-  return {
-    title,
-    description: "",
-    keywords,
-    category,
-  };
-}
-
-function buildShutterstock(
-  titleBase: string,
-  categoryLabel: string,
-  category: string,
-  mood: string,
-  lighting: string,
-  style: string
-): StockMetadata {
-  const title = `${capitalize(titleBase)} in a ${mood} ${style} scene with ${lighting} lighting`;
-
-  const keywords = buildKeywords(
-    titleBase,
-    categoryLabel,
-    mood,
-    lighting,
-    style,
-    SHUTTERSTOCK_KEYWORDS_MAX
-  );
-  while (keywords.length < SHUTTERSTOCK_KEYWORDS_MIN) {
-    const extra = ["background", "scene", "composition"];
-    for (const item of extra) {
-      if (keywords.length >= SHUTTERSTOCK_KEYWORDS_MIN) break;
-      if (!keywords.includes(item)) keywords.push(item);
-    }
-  }
-
-  return {
-    title,
-    description: `${title}. The ${mood} atmosphere and ${lighting} lighting create a ${style} look suited for advertising, editorial, and web use.`,
-    keywords,
-    category,
-  };
-}
-
-function buildMetadata(_image: ImageAsset, seed: number): GeneratedMetadata {
-  const rand = mulberry32(seed);
-  const titleBase = "Digital Stock Image";
-  const mood = moods[Math.floor(rand() * moods.length)];
-  const lighting = lightings[Math.floor(rand() * lightings.length)];
-  const style = styles[Math.floor(rand() * styles.length)];
-
-  const adobeCategory =
-    ADOBE_CATEGORIES[Math.floor(rand() * ADOBE_CATEGORIES.length)];
-  const ssPrimary =
-    SHUTTERSTOCK_CATEGORIES[
-      Math.floor(rand() * SHUTTERSTOCK_CATEGORIES.length)
-    ];
-  const ssSecondary =
-    rand() < 0.5
-      ? SHUTTERSTOCK_CATEGORIES[
-          Math.floor(rand() * SHUTTERSTOCK_CATEGORIES.length)
-        ]
-      : null;
-  const ssCategories = String(
-    ssPrimary.label + (ssSecondary ? `, ${ssSecondary.label}` : "")
-  );
-
-  return {
-    adobe: buildAdobe(
-      titleBase,
-      adobeCategory.label,
-      String(adobeCategory.id),
-      mood,
-      lighting,
-      style
-    ),
-    shutterstock: buildShutterstock(
-      titleBase,
-      ssPrimary.label,
-      ssCategories,
-      mood,
-      lighting,
-      style
-    ),
-  };
 }
 
 function splitTerms(value: string): string[] {
@@ -765,22 +600,10 @@ function applySettings(
   };
 }
 
-export function generateLocal(
-  image: ImageAsset,
-  settings: Partial<GenerationSettings> = {}
-): GenerationResult {
-  const fullSettings: GenerationSettings = {
-    ...DEFAULT_GENERATION_SETTINGS,
-    ...settings,
-  };
-  const seed = hashString(image.name + image.size);
-  const metadata = applySettings(buildMetadata(image, seed), fullSettings);
+export function buildNeutralMetadata(): GeneratedMetadata {
   return {
-    id: crypto.randomUUID(),
-    imageId: image.id,
-    createdAt: new Date().toISOString(),
-    imageName: image.name,
-    metadata: applySettings(metadata, fullSettings),
+    adobe: { title: "", description: "", keywords: [], category: "" },
+    shutterstock: { title: "", description: "", keywords: [], category: "" },
   };
 }
 
@@ -1097,6 +920,23 @@ async function runGenerationPipeline(args: {
     }
   }
   profiler.end("analysis");
+  if (analysis === EMPTY_ANALYSIS) {
+    devLog({
+      event: "analysis-failed",
+      imageId: image.id,
+      name: image.name,
+      attempts: ANALYSIS_MAX_RETRIES,
+    });
+    throw new MetadataQualityError(
+      `Visual analysis failed for "${image.name}" after ${ANALYSIS_MAX_RETRIES} attempts`
+    );
+  }
+  devLog({
+    event: "analysis-complete",
+    imageId: image.id,
+    name: image.name,
+    platform,
+  });
 
   // Stage 2: generate metadata from the analysis (per marketplace focus).
   profiler.start("generate");
@@ -1109,11 +949,21 @@ async function runGenerationPipeline(args: {
   const raw = await call(metadataPrompt, true);
   const parsed = parseMetadata(raw);
   if (!parsed) {
-    console.warn(
-      "[Generate] Metadata parse failed, falling back to local metadata"
+    devLog({
+      event: "metadata-parse-failed",
+      imageId: image.id,
+      name: image.name,
+    });
+    throw new MetadataQualityError(
+      `Metadata response could not be parsed for "${image.name}"`
     );
-    return fallback;
   }
+  devLog({
+    event: "metadata-generated",
+    imageId: image.id,
+    name: image.name,
+    platform,
+  });
 
   let metadata: GeneratedMetadata = {
     adobe: normalize(parsed.adobe, fallback.adobe, "adobe"),
@@ -1125,10 +975,29 @@ async function runGenerationPipeline(args: {
   };
   profiler.end("generate");
 
-  // Stage 3: application-side validation.
+  // Stage 3: application-side validation. Validation failures are hard errors:
+  // we never fall back to generic/fabricated metadata, we retry via the queue.
   let report = validateGeneratedMetadata(metadata, settings);
+  devLog({
+    event: "validation",
+    imageId: image.id,
+    name: image.name,
+    errors: report.errors.map(
+      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+    ),
+    warnings: report.warnings.map(
+      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+    ),
+  });
+  if (report.errors.length > 0) {
+    throw new MetadataQualityError(
+      `Metadata failed validation for "${image.name}": ${report.errors
+        .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
+        .join("; ")}`
+    );
+  }
 
-  // Stage 4: targeted refinement of failing components only.
+  // Stage 4: targeted refinement of failing components only (image re-attached).
   for (
     let round = 0;
     round < REFINE_MAX_ROUNDS && report.errors.length > 0;
@@ -1142,7 +1011,7 @@ async function runGenerationPipeline(args: {
       issues: report.errors,
       platform,
     });
-    const refinedRaw = await call(refinePrompt, false);
+    const refinedRaw = await call(refinePrompt, true);
     const refined = parseMetadata(refinedRaw);
     if (!refined) break;
     metadata = mergeRefinedMetadata(metadata, refined);
@@ -1150,11 +1019,18 @@ async function runGenerationPipeline(args: {
   }
 
   if (report.errors.length > 0) {
-    console.warn(
-      `[Generate] Metadata quality issues remaining after refinement:`,
-      report.errors.map(
+    devLog({
+      event: "validation-remaining",
+      imageId: image.id,
+      name: image.name,
+      errors: report.errors.map(
         (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
-      )
+      ),
+    });
+    throw new MetadataQualityError(
+      `Metadata still fails validation for "${image.name}" after refinement: ${report.errors
+        .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
+        .join("; ")}`
     );
   }
 
@@ -1241,8 +1117,7 @@ export async function generateWithApi(
     ...DEFAULT_GENERATION_SETTINGS,
     ...settings,
   };
-  const seed = hashString(image.name + image.size);
-  const fallback = buildMetadata(image, seed);
+  const fallback = buildNeutralMetadata();
 
   const metadata = await runGenerationPipeline({
     image,
@@ -1340,8 +1215,7 @@ export async function generateWithOpenAI(
     ...DEFAULT_GENERATION_SETTINGS,
     ...settings,
   };
-  const seed = hashString(image.name + image.size);
-  const fallback = buildMetadata(image, seed);
+  const fallback = buildNeutralMetadata();
 
   const metadata = await runGenerationPipeline({
     image,
@@ -1443,8 +1317,7 @@ export async function generateWithMistral(
     ...DEFAULT_GENERATION_SETTINGS,
     ...settings,
   };
-  const seed = hashString(image.name + image.size);
-  const fallback = buildMetadata(image, seed);
+  const fallback = buildNeutralMetadata();
 
   const metadata = await runGenerationPipeline({
     image,

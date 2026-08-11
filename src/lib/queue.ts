@@ -15,9 +15,9 @@ import {
   cooldownMsForError,
   markModelUnavailable,
 } from "@/lib/key-health";
+import { devLog } from "@/lib/dev-log";
 import {
   friendlyApiError,
-  generateLocal,
   generateWithApi,
   generateWithMistral,
   generateWithOpenAI,
@@ -27,6 +27,7 @@ import {
   isNetworkError,
   isQuotaExceeded,
   isRateLimited,
+  MetadataQualityError,
   NoActiveKeyError,
   prepareImage,
   providerSwitchReason,
@@ -65,6 +66,9 @@ let preferredProvider: ApiProvider = "gemini";
 let recoveryProbeRunning = false;
 let backoffAttempt = 0;
 const RECOVERY_PROBE_INTERVAL_MS = 30_000;
+
+// Maximum number of images processed with a live AI request at the same time.
+export const MAX_CONCURRENT_GENERATIONS = 2;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -341,6 +345,17 @@ async function generateWithKeys(
               : provider === "openai"
                 ? generateWithOpenAI
                 : generateWithMistral;
+          devLog({
+            event: "request-start",
+            imageId: image.id,
+            name: image.name,
+            mime: image.type,
+            size: image.size,
+            provider,
+            model,
+            keyIndex: keyIndex + 1,
+            keyCount: keys.length,
+          });
           const result = await generate(image, key.key, model, settings, signal);
           clearModelUnavailable(key.id, model);
           applyGenerationSuccess(key.id);
@@ -354,6 +369,18 @@ async function generateWithKeys(
             continue;
           }
           if (isInvalidImageError(error)) throw error;
+          if (error instanceof MetadataQualityError) {
+            nonRateLimitError ??= error;
+            devLog({
+              event: "quality-retry",
+              imageId: image.id,
+              name: image.name,
+              provider,
+              model,
+              reason: error.message,
+            });
+            continue modelLoop;
+          }
 
           // Gemini per-key model fallback: mark the failing model as
           // temporarily unavailable for this key, then retry the next model
@@ -615,7 +642,7 @@ async function processOne(
   try {
     const { settings } = useAppStore.getState();
     if (activeKeys(useAppStore.getState().apiKeys).length === 0) {
-      result = generateLocal(image, settings);
+      throw new NoActiveKeyError();
     } else {
       const cacheKey = await resultCacheKey(image, settings);
       const cached = useAppStore.getState().resultCache[cacheKey];
@@ -789,7 +816,7 @@ export async function runQueue(
     }
   };
 
-  const CONCURRENCY = 3;
+  const CONCURRENCY = MAX_CONCURRENT_GENERATIONS;
 
   const runConcurrent = async (items: ImageAsset[]): Promise<void> => {
     let nextIndex = 0;

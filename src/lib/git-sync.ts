@@ -5,7 +5,6 @@ import type {
   GitPushResult,
 } from "@/lib/types";
 import { useAppStore } from "@/store/use-app-store";
-import { toast } from "@/store/use-toast-store";
 
 function dateStamp(): string {
   return new Date().toISOString().slice(0, 10);
@@ -81,56 +80,4 @@ export async function pushToGitHub(): Promise<GitPushResult> {
   }
 }
 
-export async function testGitConnection(): Promise<GitPushResult> {
-  const config = useAppStore.getState().gitConfig;
 
-  if (!config.repoUrl.trim()) {
-    return { ok: false, changed: false, message: "Add the GitHub repository URL first." };
-  }
-  if (!config.token.trim()) {
-    return { ok: false, changed: false, message: "Add a GitHub Personal Access Token first." };
-  }
-
-  storePushing("Testing GitHub connection…");
-  try {
-    const response = await fetch("/api/git-push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "test",
-        repoUrl: config.repoUrl,
-        branch: config.branch,
-        token: config.token,
-      }),
-    });
-    const result = (await response.json()) as GitPushResult;
-    useAppStore.getState().setGitPushStatus({
-      state: result.ok ? "success" : "error",
-      message: result.message,
-      branch: result.branch ?? config.branch,
-      lastPushedAt: null,
-    });
-    return result;
-  } catch (error) {
-    const result = buildErrorResult(error);
-    useAppStore.getState().setGitPushStatus({ state: "error", message: result.message });
-    return result;
-  }
-}
-
-function storePushing(message: string): void {
-  useAppStore.getState().setGitPushStatus({ state: "pushing", message });
-}
-
-export async function autoPushAfterGeneration(): Promise<void> {
-  const config = useAppStore.getState().gitConfig;
-  if (!config.enabled || !config.autoPush) return;
-  if (useAppStore.getState().results.length === 0) return;
-
-  const result = await pushToGitHub();
-  if (result.ok) {
-    toast("success", "Pushed to GitHub", result.message);
-  } else {
-    toast("error", "Git push failed", result.message);
-  }
-}

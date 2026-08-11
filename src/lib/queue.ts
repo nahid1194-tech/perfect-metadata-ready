@@ -46,7 +46,6 @@ import {
 } from "@/lib/models";
 import { GEMINI_MULTI_MODEL_FALLBACK } from "@/lib/model-catalog";
 import { backoffDelayMs } from "@/lib/rate-limiter";
-import { autoPushAfterGeneration } from "@/lib/git-sync";
 import type {
   ApiKeyEntry,
   ApiProvider,
@@ -915,7 +914,6 @@ export async function runQueue(
     );
     if (success > 0) {
       setTimeout(() => useAppStore.getState().openSuccess(), 400);
-      void autoPushAfterGeneration();
     }
   } else if (success > 0) {
     toast(

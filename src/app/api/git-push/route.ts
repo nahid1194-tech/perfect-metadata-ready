@@ -341,7 +341,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         ok: false,
         changed: false,
-        message: "No repository URL configured. Add the GitHub repository URL in Git Sync settings.",
+        message: "No repository URL configured. Set GIT_REPOSITORY_URL in your environment.",
         code: "NO_URL",
       },
       { status: 400 }
@@ -352,7 +352,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       {
         ok: false,
         changed: false,
-        message: "No GitHub token configured. Add a Personal Access Token in Git Sync settings.",
+        message: "No GitHub token configured. Set GITHUB_TOKEN in your environment.",
         code: "NO_TOKEN",
       },
       { status: 400 }

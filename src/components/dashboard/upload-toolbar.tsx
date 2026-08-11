@@ -56,7 +56,6 @@ export function UploadToolbar() {
   const progress = useAppStore((state) => state.progress);
   const debugStatus = useAppStore((state) => state.debugStatus);
   const activeImageId = useAppStore((state) => state.activeImageId);
-  const gitEnabled = useAppStore((state) => state.gitConfig.enabled);
   const gitPushStatus = useAppStore((state) => state.gitPushStatus);
   const { run, stop, generating, queueState } = useGenerate();
 
@@ -253,7 +252,7 @@ export function UploadToolbar() {
             variant="outline"
             size="sm"
             className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
-            disabled={results.length === 0 || !gitEnabled || pushing || gitPushStatus.state === "pushing"}
+            disabled={results.length === 0 || pushing || gitPushStatus.state === "pushing"}
             onClick={handlePush}
           >
             {pushing || gitPushStatus.state === "pushing" ? (

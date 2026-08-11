@@ -35,8 +35,6 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
 };
 
 export const DEFAULT_GIT_CONFIG: GitSyncConfig = {
-  enabled: false,
-  autoPush: false,
   repoUrl: "",
   branch: "main",
   token: "",

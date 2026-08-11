@@ -7,7 +7,6 @@ import { Menu, X } from "lucide-react"
 import { ensureModelCache } from "@/lib/models"
 import { restoreBackgroundJob, type RestoredJob } from "@/lib/background-queue"
 import { ControlCard } from "@/components/dashboard/control-card"
-import { GitSyncSettings } from "@/components/dashboard/git-sync-settings"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { InterruptedJobBanner } from "@/components/dashboard/interrupted-job-banner"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
@@ -61,8 +60,6 @@ export function DashboardShell() {
       <ControlCard />
       <div className="my-6 h-px bg-border" />
       <MetadataSettings />
-      <div className="my-6 h-px bg-border" />
-      <GitSyncSettings />
     </>
   );
 

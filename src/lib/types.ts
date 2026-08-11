@@ -192,8 +192,6 @@ export type GenerationSettings = {
 };
 
 export type GitSyncConfig = {
-  enabled: boolean;
-  autoPush: boolean;
   repoUrl: string;
   branch: string;
   token: string;

@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react"
 import { motion } from "framer-motion"
-import { FileImage, Loader2, RefreshCw, Trash2 } from "lucide-react"
+import { FileImage, Loader2, Maximize2, RefreshCw, Trash2 } from "lucide-react"
 
 import type { GenerationResult } from "@/lib/types"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { ImagePreviewModal } from "@/components/dashboard/image-preview-modal"
 import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
@@ -36,6 +37,7 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const removeResult = useAppStore((state) => state.removeResult);
   const { regenerate } = useGenerate();
   const [regenerating, setRegenerating] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const format = marketplaceFormat(platform);
   const metadata = result.metadata[format];
@@ -45,6 +47,8 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const image = images.find((item) => item.id === result.imageId);
   const previewable =
     image && (image.type.startsWith("image/") || image.type.startsWith("video/"));
+  const previewSrc = image?.apiDataUrl ?? image?.dataUrl;
+  const previewIsVideo = image?.type.startsWith("video/") ?? false;
 
   const patch = (field: keyof typeof metadata, value: string | string[]) =>
     updateResult(result.id, (current) => ({
@@ -84,38 +88,52 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   };
 
   return (
-    <motion.article
-      layout
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ type: "spring", stiffness: 260, damping: 26 }}
-      className="rounded-[20px] border bg-card p-4 shadow-sm sm:p-5"
-    >
+    <>
+      <motion.article
+        layout
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ type: "spring", stiffness: 260, damping: 26 }}
+        className="rounded-[20px] border bg-card p-4 shadow-sm sm:p-5"
+      >
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3">
-          <div className="relative shrink-0">
-            {previewable && image.type.startsWith("video/") ? (
-              <video
-                src={image.apiDataUrl ?? image.dataUrl}
-                muted
-                className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
-              />
-            ) : previewable ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={image.apiDataUrl ?? image.dataUrl}
-                alt={result.imageName}
-                className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
-              />
-            ) : (
-              <div className="flex h-24 w-28 items-center justify-center rounded-xl bg-muted ring-1 ring-foreground/10">
-                <FileImage className="size-7 text-muted-foreground" />
-              </div>
-            )}
-            <Badge className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-foreground text-background">
-              {marketplaceLabel(platform)}
-            </Badge>
+          <div className="flex shrink-0 flex-col items-center gap-2">
+            <div className="relative">
+              {previewable && image.type.startsWith("video/") ? (
+                <video
+                  src={image.apiDataUrl ?? image.dataUrl}
+                  muted
+                  className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
+                />
+              ) : previewable ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={image.apiDataUrl ?? image.dataUrl}
+                  alt={result.imageName}
+                  className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
+                />
+              ) : (
+                <div className="flex h-24 w-28 items-center justify-center rounded-xl bg-muted ring-1 ring-foreground/10">
+                  <FileImage className="size-7 text-muted-foreground" />
+                </div>
+              )}
+              <Badge className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-foreground text-background">
+                {marketplaceLabel(platform)}
+              </Badge>
+            </div>
+            {previewSrc ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPreviewOpen(true)}
+                aria-label="Preview image"
+              >
+                <Maximize2 />
+                Preview
+              </Button>
+            ) : null}
           </div>
 
           <p className="min-w-0 flex-1 truncate pt-1 text-sm font-medium">
@@ -222,5 +240,15 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
         </div>
       </div>
     </motion.article>
+
+    {previewOpen && previewSrc ? (
+      <ImagePreviewModal
+        src={previewSrc}
+        isVideo={previewIsVideo}
+        alt={result.imageName}
+        onClose={() => setPreviewOpen(false)}
+      />
+    ) : null}
+  </>
   );
 });

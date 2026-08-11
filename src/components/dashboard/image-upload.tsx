@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { FileImage, ImagePlus, Loader2, X } from "lucide-react"
 
@@ -32,7 +32,12 @@ export function ImageUpload() {
   const generating = useAppStore((state) => state.generating);
   const [dragging, setDragging] = useState(false);
   const [queue, setQueue] = useState<UploadItem[]>([]);
+  const [galleryHidden, setGalleryHidden] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (generating) setGalleryHidden(true);
+  }, [generating]);
 
   const readFiles = useCallback(
     async (fileList: FileList | File[]) => {
@@ -186,7 +191,7 @@ export function ImageUpload() {
         </div>
       ) : null}
 
-      {images.length > 0 ? (
+      {images.length > 0 && !galleryHidden ? (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <label className="flex items-center gap-2 text-sm font-medium">

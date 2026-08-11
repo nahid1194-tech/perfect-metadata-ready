@@ -64,7 +64,7 @@ export function MobileNav() {
           />
           <div className="absolute inset-y-0 left-0 flex w-64 flex-col border-r bg-card animate-in slide-in-from-left duration-200">
             <div className="flex h-14 items-center justify-between border-b px-4">
-              <span className="font-semibold">PromptLab</span>
+              <span className="font-semibold">Perfect Metadata</span>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -92,7 +92,7 @@ export function MobileNav() {
               ))}
             </nav>
             <div className="border-t p-4 text-xs text-muted-foreground">
-              PromptLab v0.1.0
+              Perfect Metadata v0.1.0
             </div>
           </div>
         </div>

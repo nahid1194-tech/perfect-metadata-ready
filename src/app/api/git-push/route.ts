@@ -251,9 +251,9 @@ async function runPush(
     await runGit(
       [
         "-c",
-        "user.name=PromptLab Auto-Push",
+        "user.name=Perfect Metadata Auto-Push",
         "-c",
-        "user.email=auto-push@promptlab.local",
+        "user.email=auto-push@perfect-metadata.local",
         "commit",
         "-m",
         commitMessage,

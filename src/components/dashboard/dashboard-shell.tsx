@@ -81,7 +81,7 @@ export function DashboardShell() {
         >
           <Menu />
         </Button>
-        <span className="font-semibold tracking-tight">PromptLab</span>
+        <span className="font-semibold tracking-tight">Perfect Metadata</span>
       </header>
 
       <AnimatePresence>

@@ -28,7 +28,7 @@ export function Sidebar() {
           <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Sparkles className="size-4" />
           </span>
-          PromptLab
+          Perfect Metadata
         </Link>
       </div>
 
@@ -55,7 +55,7 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t p-4 text-xs text-muted-foreground">
-        PromptLab v0.1.0
+        Perfect Metadata v0.1.0
       </div>
     </aside>
   );

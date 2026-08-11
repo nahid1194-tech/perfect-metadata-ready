@@ -44,7 +44,7 @@ export default function Home() {
             <span className="text-primary">stock metadata</span>
           </h1>
           <p className="text-lg text-muted-foreground">
-            PromptLab analyzes your images and generates structured metadata
+            Perfect Metadata analyzes your images and generates structured metadata
             for Adobe Stock and Shutterstock. Everything runs in your browser.
           </p>
           <div className="flex flex-wrap gap-3">

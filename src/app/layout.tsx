@@ -14,8 +14,8 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   title: {
-    default: "PromptLab",
-    template: "%s · PromptLab",
+    default: "Perfect Metadata",
+    template: "%s · Perfect Metadata",
   },
   description:
     "Generate image metadata for Adobe Stock and Shutterstock, then export to CSV.",

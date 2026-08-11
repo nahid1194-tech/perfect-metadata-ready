@@ -16,7 +16,7 @@ const titles: Record<string, string> = {
 
 export function Header() {
   const pathname = usePathname();
-  const title = titles[pathname] ?? "PromptLab";
+  const title = titles[pathname] ?? "Perfect Metadata";
 
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur sm:px-4">
@@ -42,7 +42,7 @@ export function Header() {
         <ThemeToggle />
         <Avatar className="size-8">
           <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-            PL
+            PM
           </AvatarFallback>
         </Avatar>
       </div>

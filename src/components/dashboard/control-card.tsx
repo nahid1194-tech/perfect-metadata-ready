@@ -81,7 +81,7 @@ export function ControlCard() {
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Sparkles className="size-4" />
           </span>
-          <span className="text-base font-semibold tracking-tight">PromptLab</span>
+          <span className="text-base font-semibold tracking-tight">Perfect Metadata</span>
         </div>
         <ThemeToggle />
       </div>

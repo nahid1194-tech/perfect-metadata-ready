@@ -10,6 +10,7 @@ import {
   isSupportedFile,
   processUploadFiles,
 } from "@/lib/upload-process"
+import { EPS_MAX_FILE_SIZE_MB } from "@/lib/image-process"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { useAppStore } from "@/store/use-app-store"
@@ -79,7 +80,13 @@ export function ImageUpload() {
       for (const failure of failures) {
         toast(
           "error",
-          failure.tooLarge ? "Image too large" : "Could not process file",
+          failure.kind === "eps-render"
+            ? "Could not render EPS"
+            : failure.kind === "eps-too-large"
+              ? "EPS too large"
+              : failure.tooLarge
+                ? "Image too large"
+                : "Could not process file",
           failure.message
         );
       }
@@ -144,7 +151,7 @@ export function ImageUpload() {
             Drag &amp; Drop Your Images Here
           </p>
           <p className="text-sm text-muted-foreground">
-            or browse — JPG, PNG, WEBP, SVG, EPS, Videos · up to {MAX_IMAGES} images
+            or browse — JPG, PNG, WEBP, SVG, EPS, Videos · up to {MAX_IMAGES} images · EPS up to {EPS_MAX_FILE_SIZE_MB} MB
           </p>
         </div>
         <input

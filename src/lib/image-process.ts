@@ -5,6 +5,17 @@ export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
 export const IMAGE_API_MAX_DIMENSION = 1600;
 
+const DEFAULT_EPS_MAX_MB = 50;
+
+function readEpsMaxMb(): number {
+  const raw = process.env.NEXT_PUBLIC_MAX_EPS_FILE_SIZE_MB;
+  const parsed = raw == null ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_EPS_MAX_MB;
+}
+
+export const EPS_MAX_FILE_SIZE_MB = readEpsMaxMb();
+export const EPS_MAX_BYTES = EPS_MAX_FILE_SIZE_MB * 1024 * 1024;
+
 const DEFAULT_MAX_DIMENSION = 4096;
 const MIN_QUALITY = 0.3;
 const MIN_DIMENSION = 1024;

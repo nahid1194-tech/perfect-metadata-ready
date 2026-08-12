@@ -19,7 +19,11 @@ import {
   isValidAdobeCategory,
   normalizeShutterstockCategories,
 } from "@/lib/stock-spec";
-import { prepareImageForApi } from "@/lib/image-process";
+import {
+  ANALYSIS_MAX_DIMENSION,
+  ANALYSIS_QUALITY_MAX_DIMENSION,
+  prepareImageForApi,
+} from "@/lib/image-process";
 import {
   backgroundRules,
   detectBackground,
@@ -36,7 +40,10 @@ import {
   extractJson,
   parseAnalysis,
 } from "@/lib/prompts";
-import { validateGeneratedMetadata } from "@/lib/metadata-validator";
+import {
+  validateGeneratedMetadata,
+  type ValidationReport,
+} from "@/lib/metadata-validator";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -856,20 +863,25 @@ type PreparedAnalysis = {
 
 const preparedAnalysisCache = new Map<string, Promise<PreparedAnalysis>>();
 
-async function getPreparedAnalysis(image: ImageAsset): Promise<PreparedAnalysis> {
-  const cached = preparedAnalysisCache.get(image.id);
+async function getPreparedAnalysis(
+  image: ImageAsset,
+  dimension = ANALYSIS_MAX_DIMENSION
+): Promise<PreparedAnalysis> {
+  const cacheKey = `${image.id}@${dimension}`;
+  const cached = preparedAnalysisCache.get(cacheKey);
   if (cached) return cached;
   const promise = (async () => {
     const profiler = createProfiler();
-    profiler.start("prep");
-    const prepared = await prepareImageForApi(image);
-    profiler.mark("prepared");
+    profiler.start("prepare");
+    const prepared = await prepareImageForApi(image, { maxDimension: dimension });
+    profiler.end("prepare");
+    profiler.start("background");
     const background = await detectBackground(prepared.dataUrl);
-    profiler.end("bg");
-    logProfile(`${image.name}:prepare`, profiler.result());
+    profiler.end("background");
+    logProfile(`${image.name}:prepare@${dimension}`, profiler.result());
     return { ...prepared, background };
   })();
-  preparedAnalysisCache.set(image.id, promise);
+  preparedAnalysisCache.set(cacheKey, promise);
   return promise;
 }
 
@@ -899,143 +911,177 @@ async function runGenerationPipeline(args: {
   fallback: GeneratedMetadata;
   settings: GenerationSettings;
   platform: "adobe" | "shutterstock";
-  call: (prompt: string, includeImage?: boolean) => Promise<string>;
+  call: (
+    prompt: string,
+    includeImage?: boolean,
+    dimension?: number
+  ) => Promise<string>;
 }): Promise<GeneratedMetadata> {
   const { image, fallback, settings, platform, call } = args;
   const profiler = createProfiler();
 
-  const { background } = await getPreparedAnalysis(image);
-  const bgRules = backgroundRules(background);
+  const runPass = async (
+    dimension: number
+  ): Promise<{ metadata: GeneratedMetadata; report: ValidationReport }> => {
+    const { background } = await getPreparedAnalysis(image, dimension);
+    const bgRules = backgroundRules(background);
 
-  // Stage 1: deep multi-pass visual analysis (reuses the prepared image).
-  profiler.start("analysis");
-  let analysis: ImageAnalysis = EMPTY_ANALYSIS;
-  for (let attempt = 0; attempt < ANALYSIS_MAX_RETRIES; attempt++) {
-    const analysisPrompt = buildAnalysisPrompt({ bgRules });
-    const analysisRaw = await call(analysisPrompt, true);
-    const parsed = parseAnalysis(analysisRaw);
-    if (parsed) {
-      analysis = parsed;
-      break;
+    // Stage 1: deep multi-pass visual analysis (image attached once).
+    profiler.start("analysis");
+    let analysis: ImageAnalysis = EMPTY_ANALYSIS;
+    for (let attempt = 0; attempt < ANALYSIS_MAX_RETRIES; attempt++) {
+      const analysisPrompt = buildAnalysisPrompt({ bgRules });
+      const analysisRaw = await call(analysisPrompt, true, dimension);
+      const parsed = parseAnalysis(analysisRaw);
+      if (parsed) {
+        analysis = parsed;
+        break;
+      }
     }
-  }
-  profiler.end("analysis");
-  if (analysis === EMPTY_ANALYSIS) {
+    profiler.end("analysis");
+    if (analysis === EMPTY_ANALYSIS) {
+      devLog({
+        event: "analysis-failed",
+        imageId: image.id,
+        name: image.name,
+        attempts: ANALYSIS_MAX_RETRIES,
+      });
+      throw new MetadataQualityError(
+        `Visual analysis failed for "${image.name}" after ${ANALYSIS_MAX_RETRIES} attempts`
+      );
+    }
     devLog({
-      event: "analysis-failed",
+      event: "analysis-complete",
       imageId: image.id,
       name: image.name,
-      attempts: ANALYSIS_MAX_RETRIES,
+      platform,
     });
-    throw new MetadataQualityError(
-      `Visual analysis failed for "${image.name}" after ${ANALYSIS_MAX_RETRIES} attempts`
-    );
-  }
-  devLog({
-    event: "analysis-complete",
-    imageId: image.id,
-    name: image.name,
-    platform,
-  });
 
-  // Stage 2: generate metadata from the analysis (per marketplace focus).
-  profiler.start("generate");
-  const metadataPrompt = buildMetadataPrompt({
-    settings,
-    bgRules,
-    analysis,
-    platform,
-  });
-  const raw = await call(metadataPrompt, true);
-  const parsed = parseMetadata(raw);
-  if (!parsed) {
-    devLog({
-      event: "metadata-parse-failed",
-      imageId: image.id,
-      name: image.name,
-    });
-    throw new MetadataQualityError(
-      `Metadata response could not be parsed for "${image.name}"`
-    );
-  }
-  devLog({
-    event: "metadata-generated",
-    imageId: image.id,
-    name: image.name,
-    platform,
-  });
-
-  let metadata: GeneratedMetadata = {
-    adobe: normalize(parsed.adobe, fallback.adobe, "adobe"),
-    shutterstock: normalize(
-      parsed.shutterstock,
-      fallback.shutterstock,
-      "shutterstock"
-    ),
-  };
-  profiler.end("generate");
-
-  // Stage 3: application-side validation. Validation failures are hard errors:
-  // we never fall back to generic/fabricated metadata, we retry via the queue.
-  let report = validateGeneratedMetadata(metadata, settings);
-  devLog({
-    event: "validation",
-    imageId: image.id,
-    name: image.name,
-    errors: report.errors.map(
-      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
-    ),
-    warnings: report.warnings.map(
-      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
-    ),
-  });
-  if (report.errors.length > 0) {
-    throw new MetadataQualityError(
-      `Metadata failed validation for "${image.name}": ${report.errors
-        .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
-        .join("; ")}`
-    );
-  }
-
-  // Stage 4: targeted refinement of failing components only (image re-attached).
-  for (
-    let round = 0;
-    round < REFINE_MAX_ROUNDS && report.errors.length > 0;
-    round++
-  ) {
-    const refinePrompt = buildRefinePrompt({
+    // Stage 2: generate metadata from the analysis (text-only, image reused
+    // from the prepared analysis — no second image upload).
+    profiler.start("metadata");
+    const metadataPrompt = buildMetadataPrompt({
       settings,
       bgRules,
       analysis,
-      metadata,
-      issues: report.errors,
       platform,
     });
-    const refinedRaw = await call(refinePrompt, true);
-    const refined = parseMetadata(refinedRaw);
-    if (!refined) break;
-    metadata = mergeRefinedMetadata(metadata, refined);
-    report = validateGeneratedMetadata(metadata, settings);
-  }
-
-  if (report.errors.length > 0) {
+    const raw = await call(metadataPrompt, false, dimension);
+    const parsed = parseMetadata(raw);
+    if (!parsed) {
+      devLog({
+        event: "metadata-parse-failed",
+        imageId: image.id,
+        name: image.name,
+      });
+      throw new MetadataQualityError(
+        `Metadata response could not be parsed for "${image.name}"`
+      );
+    }
     devLog({
-      event: "validation-remaining",
+      event: "metadata-generated",
+      imageId: image.id,
+      name: image.name,
+      platform,
+    });
+
+    let metadata: GeneratedMetadata = {
+      adobe: normalize(parsed.adobe, fallback.adobe, "adobe"),
+      shutterstock: normalize(
+        parsed.shutterstock,
+        fallback.shutterstock,
+        "shutterstock"
+      ),
+    };
+    profiler.end("metadata");
+
+    // Stage 3: application-side validation. Validation failures are hard
+    // errors: we never fall back to generic/fabricated metadata.
+    let report = validateGeneratedMetadata(metadata, settings);
+    devLog({
+      event: "validation",
       imageId: image.id,
       name: image.name,
       errors: report.errors.map(
         (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
       ),
+      warnings: report.warnings.map(
+        (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+      ),
     });
-    throw new MetadataQualityError(
-      `Metadata still fails validation for "${image.name}" after refinement: ${report.errors
-        .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
-        .join("; ")}`
-    );
+
+    // Stage 4: targeted refinement of failing components only (text-only).
+    for (
+      let round = 0;
+      round < REFINE_MAX_ROUNDS && report.errors.length > 0;
+      round++
+    ) {
+      const refinePrompt = buildRefinePrompt({
+        settings,
+        bgRules,
+        analysis,
+        metadata,
+        issues: report.errors,
+        platform,
+      });
+      const refinedRaw = await call(refinePrompt, false, dimension);
+      const refined = parseMetadata(refinedRaw);
+      if (!refined) break;
+      metadata = mergeRefinedMetadata(metadata, refined);
+      report = validateGeneratedMetadata(metadata, settings);
+    }
+
+    return { metadata, report };
+  };
+
+  const validationError = (report: ValidationReport): string =>
+    `Metadata still fails validation for "${image.name}" after refinement: ${report.errors
+      .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
+      .join("; ")}`;
+
+  // Pass 1: standard analysis resolution.
+  const primary = await runPass(ANALYSIS_MAX_DIMENSION);
+  if (primary.report.errors.length === 0) {
+    logProfile(`${image.name}:generate`, profiler.result());
+    return primary.metadata;
   }
 
-  logProfile(`${image.name}:generate`, profiler.result());
-  return metadata;
+  // Pass 2 (quality fallback): re-run the full pass once at a higher
+  // resolution, so images that fail validation at the standard size get a
+  // second chance at full detail before being reported as failed.
+  if (ANALYSIS_QUALITY_MAX_DIMENSION > ANALYSIS_MAX_DIMENSION) {
+    profiler.start("qualityFallback");
+    const quality = await runPass(ANALYSIS_QUALITY_MAX_DIMENSION);
+    profiler.end("qualityFallback");
+    if (quality.report.errors.length === 0) {
+      devLog({
+        event: "quality-fallback-success",
+        imageId: image.id,
+        name: image.name,
+      });
+      logProfile(`${image.name}:generate`, profiler.result());
+      return quality.metadata;
+    }
+    devLog({
+      event: "validation-remaining",
+      imageId: image.id,
+      name: image.name,
+      errors: quality.report.errors.map(
+        (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+      ),
+    });
+    throw new MetadataQualityError(validationError(quality.report));
+  }
+
+  devLog({
+    event: "validation-remaining",
+    imageId: image.id,
+    name: image.name,
+    errors: primary.report.errors.map(
+      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+    ),
+  });
+  throw new MetadataQualityError(validationError(primary.report));
 }
 
 async function callGemini(
@@ -1100,8 +1146,11 @@ async function callGemini(
   );
 }
 
-async function analysisImageParts(image: ImageAsset): Promise<unknown[]> {
-  const { dataUrl, mimeType } = await getPreparedAnalysis(image);
+async function analysisImageParts(
+  image: ImageAsset,
+  dimension = ANALYSIS_MAX_DIMENSION
+): Promise<unknown[]> {
+  const { dataUrl, mimeType } = await getPreparedAnalysis(image, dimension);
   const base64 = dataUrl.split(",")[1] ?? dataUrl;
   return [{ inline_data: { mime_type: mimeType, data: base64 } }];
 }
@@ -1124,8 +1173,10 @@ export async function generateWithApi(
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
-    call: async (prompt, includeImage = true) => {
-      const parts = includeImage ? await analysisImageParts(image) : [];
+    call: async (prompt, includeImage = true, dimension) => {
+      const parts = includeImage
+        ? await analysisImageParts(image, dimension)
+        : [];
       parts.push({ text: prompt });
       return callGemini(parts, apiKey, model, 0.3, signal);
     },
@@ -1222,10 +1273,13 @@ export async function generateWithOpenAI(
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
-    call: async (prompt, includeImage = true) => {
+    call: async (prompt, includeImage = true, dimension) => {
       let imageUrl: string | undefined;
       if (includeImage) {
-        const { dataUrl, mimeType } = await getPreparedAnalysis(image);
+        const { dataUrl, mimeType } = await getPreparedAnalysis(
+          image,
+          dimension
+        );
         imageUrl = dataUrl.startsWith("data:")
           ? dataUrl
           : `data:${mimeType};base64,${dataUrl}`;
@@ -1324,10 +1378,13 @@ export async function generateWithMistral(
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
-    call: async (prompt, includeImage = true) => {
+    call: async (prompt, includeImage = true, dimension) => {
       let imageUrl: string | undefined;
       if (includeImage) {
-        const { dataUrl, mimeType } = await getPreparedAnalysis(image);
+        const { dataUrl, mimeType } = await getPreparedAnalysis(
+          image,
+          dimension
+        );
         imageUrl = dataUrl.startsWith("data:")
           ? dataUrl
           : `data:${mimeType};base64,${dataUrl}`;

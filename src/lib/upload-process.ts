@@ -1,7 +1,7 @@
 import {
+  ANALYSIS_MAX_DIMENSION,
   EPS_MAX_BYTES,
   EPS_MAX_FILE_SIZE_MB,
-  IMAGE_API_MAX_DIMENSION,
   IMAGE_MAX_BYTES,
   ImageTooLargeError,
   compressImageDataUrl,
@@ -11,7 +11,11 @@ import {
   renderVectorToPng,
   VectorConversionError,
 } from "@/lib/eps-render";
+import { createProfiler, logProfile } from "@/lib/perf";
 import type { ImageAsset } from "@/lib/types";
+
+// Bounded concurrency so many large files do not block the UI thread.
+const UPLOAD_CONCURRENCY = 4;
 
 export type UploadPhase = "reading" | "compressing" | "converting";
 
@@ -94,12 +98,14 @@ function readFileAsDataUrl(
 
 export async function processUploadFiles(
   files: File[],
-  onItem?: (file: File, patch: Partial<UploadProgressItem>) => void
+  onItem?: (file: File, patch: Partial<UploadProgressItem>) => void,
+  onAsset?: (asset: ImageAsset) => void
 ): Promise<{ assets: ImageAsset[]; failures: UploadFailure[] }> {
   const assets: ImageAsset[] = [];
   const failures: UploadFailure[] = [];
 
-  for (const file of files) {
+  const processFile = async (file: File): Promise<void> => {
+    const profiler = createProfiler();
     try {
       let dataUrl: string;
       let apiDataUrl: string | undefined;
@@ -111,28 +117,34 @@ export async function processUploadFiles(
           throw new EpsTooLargeError(EPS_MAX_FILE_SIZE_MB);
         }
         onItem?.(file, { phase: "converting", progress: 0 });
+        profiler.start("convert");
         const rendered = await renderVectorToPng(file);
         onItem?.(file, { phase: "converting", progress: 100 });
         const compressed = await compressImageDataUrl(
           rendered.dataUrl,
           IMAGE_MAX_BYTES,
-          IMAGE_API_MAX_DIMENSION
+          ANALYSIS_MAX_DIMENSION
         );
+        profiler.end("convert");
         dataUrl = compressed.dataUrl;
         apiDataUrl = compressed.dataUrl;
         apiMimeType = compressed.mimeType;
         type = compressed.mimeType;
       } else {
+        profiler.start("read");
         dataUrl = await readFileAsDataUrl(file, (progress) =>
           onItem?.(file, { phase: "reading", progress })
         );
+        profiler.end("read");
         if (isCompressibleFile(file)) {
           onItem?.(file, { phase: "compressing", progress: 0 });
+          profiler.start("compress");
           const compressed = await compressImageDataUrl(
             dataUrl,
             IMAGE_MAX_BYTES,
-            IMAGE_API_MAX_DIMENSION
+            ANALYSIS_MAX_DIMENSION
           );
+          profiler.end("compress");
           apiDataUrl = compressed.dataUrl;
           apiMimeType = compressed.mimeType;
           type = compressed.mimeType;
@@ -144,7 +156,7 @@ export async function processUploadFiles(
         }
       }
 
-      assets.push({
+      const asset: ImageAsset = {
         id: crypto.randomUUID(),
         name: file.name,
         size: file.size,
@@ -152,7 +164,12 @@ export async function processUploadFiles(
         dataUrl,
         apiDataUrl,
         apiMimeType,
-      });
+      };
+      assets.push(asset);
+      // Notify immediately so the thumbnail appears as soon as each file
+      // finishes, without waiting for the rest of the batch.
+      onAsset?.(asset);
+      logProfile(`${file.name}:upload`, profiler.result());
     } catch (error) {
       const epsRenderFailure = error instanceof VectorConversionError;
       const epsTooLarge = error instanceof EpsTooLargeError;
@@ -176,7 +193,19 @@ export async function processUploadFiles(
               }`,
       });
     }
-  }
+  };
+
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(UPLOAD_CONCURRENCY, files.length) },
+    async () => {
+      while (nextIndex < files.length) {
+        const index = nextIndex++;
+        await processFile(files[index]);
+      }
+    }
+  );
+  await Promise.all(workers);
 
   return { assets, failures };
 }

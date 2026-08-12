@@ -3,7 +3,27 @@ import { useAppStore } from "@/store/use-app-store";
 
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 
-export const IMAGE_API_MAX_DIMENSION = 1600;
+const DEFAULT_ANALYSIS_MAX_DIMENSION = 2048;
+const DEFAULT_ANALYSIS_QUALITY_MAX_DIMENSION = 3072;
+
+function readPositiveInt(envKey: string, fallback: number): number {
+  const raw = process.env[envKey];
+  const parsed = raw == null ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Maximum edge length of the derived image sent to the AI for analysis.
+export const ANALYSIS_MAX_DIMENSION = readPositiveInt(
+  "NEXT_PUBLIC_MAX_ANALYSIS_DIMENSION",
+  DEFAULT_ANALYSIS_MAX_DIMENSION
+);
+
+// Higher-resolution fallback used once when the standard analysis fails
+// validation. Enabled only when it is larger than ANALYSIS_MAX_DIMENSION.
+export const ANALYSIS_QUALITY_MAX_DIMENSION = readPositiveInt(
+  "NEXT_PUBLIC_MAX_ANALYSIS_QUALITY_DIMENSION",
+  DEFAULT_ANALYSIS_QUALITY_MAX_DIMENSION
+);
 
 const DEFAULT_EPS_MAX_MB = 50;
 
@@ -16,33 +36,56 @@ function readEpsMaxMb(): number {
 export const EPS_MAX_FILE_SIZE_MB = readEpsMaxMb();
 export const EPS_MAX_BYTES = EPS_MAX_FILE_SIZE_MB * 1024 * 1024;
 
-const DEFAULT_MAX_DIMENSION = 4096;
-const MIN_QUALITY = 0.3;
 const MIN_DIMENSION = 1024;
 
-const preparedCache = new Map<string, { dataUrl: string; mimeType: string }>();
+// JPEG/WebP quality stays within the 0.82-0.90 range so the analysis image
+// remains sharp without bloating the API payload.
+const QUALITY_STEPS = [0.9, 0.86, 0.82];
+
+type PreparedEntry = { dataUrl: string; mimeType: string };
+
+// Cached per image id and dimension so retries, key/model rotations and the
+// quality fallback reuse the same prepared image instead of recompressing.
+const preparedCache = new Map<string, PreparedEntry>();
+
+function preparedCacheKey(imageId: string, maxDimension: number): string {
+  return `${imageId}@${maxDimension}`;
+}
 
 export async function prepareImageForApi(
-  image: ImageAsset
-): Promise<{ dataUrl: string; mimeType: string }> {
-  const cached = preparedCache.get(image.id);
+  image: ImageAsset,
+  opts: { maxDimension?: number } = {}
+): Promise<PreparedEntry> {
+  const maxDimension = opts.maxDimension ?? ANALYSIS_MAX_DIMENSION;
+  const cacheKey = preparedCacheKey(image.id, maxDimension);
+  const cached = preparedCache.get(cacheKey);
   if (cached) return cached;
-  if (image.apiDataUrl && image.apiMimeType) {
+
+  // The asset already carries a prepared analysis image at the standard
+  // resolution (created at upload time) — reuse it instead of recompressing.
+  if (
+    image.apiDataUrl &&
+    image.apiMimeType &&
+    maxDimension === ANALYSIS_MAX_DIMENSION
+  ) {
     const entry = { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
-    preparedCache.set(image.id, entry);
+    preparedCache.set(cacheKey, entry);
     return entry;
   }
+
   try {
     const compressed = await compressImageDataUrl(
       image.dataUrl,
       IMAGE_MAX_BYTES,
-      IMAGE_API_MAX_DIMENSION
+      maxDimension
     );
-    preparedCache.set(image.id, compressed);
-    useAppStore.getState().updateImage(image.id, {
-      apiDataUrl: compressed.dataUrl,
-      apiMimeType: compressed.mimeType,
-    });
+    preparedCache.set(cacheKey, compressed);
+    if (maxDimension === ANALYSIS_MAX_DIMENSION) {
+      useAppStore.getState().updateImage(image.id, {
+        apiDataUrl: compressed.dataUrl,
+        apiMimeType: compressed.mimeType,
+      });
+    }
     return compressed;
   } catch (error) {
     console.warn(
@@ -119,19 +162,47 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+function hasMeaningfulTransparency(
+  image: HTMLImageElement | ImageBitmap
+): boolean {
+  const maxDim = 64;
+  const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true }) as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) return false;
+  ctx.drawImage(image, 0, 0, width, height);
+  const { data } = ctx.getImageData(0, 0, width, height);
+  let transparent = 0;
+  let sampled = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    sampled++;
+    if (data[i] < 250) transparent++;
+  }
+  return sampled > 0 && transparent / sampled > 0.01;
+}
+
 export async function compressImageDataUrl(
   dataUrl: string,
   targetMaxBytes: number,
-  maxDimension = DEFAULT_MAX_DIMENSION
-): Promise<{ dataUrl: string; mimeType: string }> {
+  maxDimension = ANALYSIS_MAX_DIMENSION,
+  opts: { preserveAlpha?: boolean } = {}
+): Promise<PreparedEntry> {
   const image = await loadImage(dataUrl);
   if (!image.width || !image.height) {
     throw new Error("The image could not be loaded for compression.");
   }
 
+  const preserveAlpha = opts.preserveAlpha !== false;
+  const transparent = preserveAlpha && hasMeaningfulTransparency(image);
+
+  // Never upscale: start from the original size capped at maxDimension.
   const largest = Math.max(image.width, image.height);
   let dimension = Math.min(maxDimension, largest);
-  let quality = 0.8;
 
   for (;;) {
     const scale = dimension / largest;
@@ -143,20 +214,35 @@ export async function compressImageDataUrl(
       | OffscreenCanvasRenderingContext2D
       | null;
     if (!ctx) throw new Error("Could not initialize image compression.");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, width, height);
 
-    const blob = await canvasToBlob(canvas, "image/jpeg", quality);
-    if (blob && blob.size <= targetMaxBytes) {
-      return { dataUrl: await blobToDataUrl(blob), mimeType: "image/jpeg" };
+    // Preserve alpha for transparent images: PNG first, then WebP (both keep
+    // the alpha channel). Never flatten to JPEG so the analysis can still
+    // detect the transparency accurately.
+    if (transparent) {
+      const png = await canvasToBlob(canvas, "image/png", QUALITY_STEPS[0]);
+      if (png && png.size <= targetMaxBytes) {
+        return { dataUrl: await blobToDataUrl(png), mimeType: "image/png" };
+      }
+      for (const quality of QUALITY_STEPS) {
+        const webp = await canvasToBlob(canvas, "image/webp", quality);
+        if (webp && webp.size <= targetMaxBytes) {
+          return { dataUrl: await blobToDataUrl(webp), mimeType: "image/webp" };
+        }
+      }
+    } else {
+      for (const quality of QUALITY_STEPS) {
+        const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+        if (blob && blob.size <= targetMaxBytes) {
+          return { dataUrl: await blobToDataUrl(blob), mimeType: "image/jpeg" };
+        }
+      }
     }
 
-    if (quality > MIN_QUALITY) {
-      quality -= 0.1;
-      continue;
-    }
     if (dimension > MIN_DIMENSION) {
-      dimension = Math.max(MIN_DIMENSION, Math.floor(dimension / 2));
-      quality = 0.8;
+      dimension = Math.max(MIN_DIMENSION, Math.round(dimension * 0.75));
       continue;
     }
     throw new ImageTooLargeError();

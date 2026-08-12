@@ -74,7 +74,11 @@ export function ImageUpload() {
           )
         );
 
-      const { assets, failures } = await processUploadFiles(accepted, patchItem);
+      const { assets, failures } = await processUploadFiles(
+        accepted,
+        patchItem,
+        (asset) => addImages([asset])
+      );
 
       setQueue([]);
       for (const failure of failures) {
@@ -90,7 +94,6 @@ export function ImageUpload() {
           failure.message
         );
       }
-      if (assets.length > 0) addImages(assets);
       if (failures.length === 0) {
         toast(
           "success",

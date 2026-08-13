@@ -121,17 +121,17 @@ export const PendingImageCard = memo(function PendingImageCard({
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
-            {previewable && image.dataUrl ? (
+            {previewable && (image.previewUrl || image.dataUrl || image.apiDataUrl) ? (
               image.type.startsWith("video/") ? (
                 <video
-                  src={image.apiDataUrl ?? image.dataUrl}
+                  src={image.previewUrl ?? image.apiDataUrl ?? image.dataUrl}
                   muted
                   className="h-20 w-24 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={image.apiDataUrl ?? image.dataUrl}
+                  src={image.previewUrl ?? image.apiDataUrl ?? image.dataUrl}
                   alt={image.name}
                   className="h-20 w-24 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
                 />

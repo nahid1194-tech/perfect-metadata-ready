@@ -753,7 +753,13 @@ export async function runQueue(
   } else {
     targets = store.images;
   }
-  targets = targets.filter((image) => Boolean(image.dataUrl));
+  targets = targets.filter(
+    (image) =>
+      Boolean(image.apiDataUrl) ||
+      Boolean(image.blob) ||
+      Boolean(image.dataUrl) ||
+      Boolean(image.previewUrl)
+  );
   if (targets.length === 0) return;
 
   if (!opts.retryFailed) {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { revokeAssetUrls } from "@/lib/object-url";
 import { createWorkerSafeStorage } from "@/lib/worker-storage";
 import { FALLBACK_MODELS } from "@/lib/model-catalog";
 import type {
@@ -197,6 +198,8 @@ export const useAppStore = create<AppState>()(
         })),
       removeImage: (id) =>
         set((state) => {
+          const target = state.images.find((img) => img.id === id);
+          if (target) revokeAssetUrls(target);
           const queueItems = { ...state.queueItems };
           delete queueItems[id];
           return {
@@ -207,7 +210,10 @@ export const useAppStore = create<AppState>()(
           };
         }),
       clearImages: () =>
-        set({ images: [], selectedIds: [], queueItems: {}, queueState: "idle" }),
+        set((state) => {
+          for (const image of state.images) revokeAssetUrls(image);
+          return { images: [], selectedIds: [], queueItems: {}, queueState: "idle" };
+        }),
       toggleSelected: (id) =>
         set((state) => ({
           selectedIds: state.selectedIds.includes(id)
@@ -279,22 +285,25 @@ export const useAppStore = create<AppState>()(
           return { results: [], queueItems };
         }),
       clearAll: () =>
-        set({
-          images: [],
-          selectedIds: [],
-          results: [],
-          generating: false,
-          progress: 0,
-          activeImageId: null,
-          queueItems: {},
-          queueState: "idle",
-          batchTotal: 0,
-          batchCompleted: 0,
-          etaSeconds: null,
-          successOpen: false,
-          errorOpen: false,
-          failedImageIds: [],
-          resultCache: {},
+        set((state) => {
+          for (const image of state.images) revokeAssetUrls(image);
+          return {
+            images: [],
+            selectedIds: [],
+            results: [],
+            generating: false,
+            progress: 0,
+            activeImageId: null,
+            queueItems: {},
+            queueState: "idle",
+            batchTotal: 0,
+            batchCompleted: 0,
+            etaSeconds: null,
+            successOpen: false,
+            errorOpen: false,
+            failedImageIds: [],
+            resultCache: {},
+          };
         }),
       resultCache: {},
       setResultCache: (key, result) =>

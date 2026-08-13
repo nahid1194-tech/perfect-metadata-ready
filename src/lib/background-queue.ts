@@ -455,7 +455,13 @@ export function resumeInterruptedBackgroundJob(): void {
       const item = job.queueItems?.[image.id];
       return !item || item.status !== "completed";
     })
-    .filter((image) => Boolean(image.dataUrl) || Boolean(image.apiDataUrl))
+    .filter(
+      (image) =>
+        Boolean(image.apiDataUrl) ||
+        Boolean(image.blob) ||
+        Boolean(image.dataUrl) ||
+        Boolean(image.previewUrl)
+    )
     .map((image) => image.id);
 
   if (remaining.length === 0) {

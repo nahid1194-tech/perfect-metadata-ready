@@ -3,9 +3,22 @@ export type ImageAsset = {
   name: string;
   size: number;
   type: string;
-  dataUrl: string;
+  /** Preview source. Object URL (blob:) for freshly picked files, or a
+   *  base64 data URL fallback for restored assets. Never the full original
+   *  read as base64 for new uploads. */
+  dataUrl?: string;
+  /** Optimized analysis image (base64 data URL) sent to the AI. */
   apiDataUrl?: string;
   apiMimeType?: string;
+  /** Object URL for instant local preview of the original file. */
+  previewUrl?: string;
+  /** Original file bytes kept locally for export/preview. For EPS/PS this is
+   *  the rendered PNG (browsers cannot display the raw vector file). */
+  blob?: Blob;
+  width?: number;
+  height?: number;
+  /** True once the AI analysis image has been prepared at upload time. */
+  prepared?: boolean;
 };
 
 export type MetadataMode = "adobe" | "shutterstock";

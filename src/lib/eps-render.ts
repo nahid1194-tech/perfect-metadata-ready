@@ -94,7 +94,7 @@ async function loadGhostscriptFactory(): Promise<GhostscriptFactory> {
 
 export async function renderVectorToPng(
   file: File
-): Promise<{ dataUrl: string; mimeType: string }> {
+): Promise<{ blob: Blob; mimeType: string }> {
   const name = file.name;
   try {
     const factory = await loadGhostscriptFactory();
@@ -164,19 +164,8 @@ export async function renderVectorToPng(
       }
 
       const blob = new Blob([pngBytes], { type: "image/png" });
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () =>
-          reject(
-            new VectorConversionError(
-              `Could not encode the converted PNG for ${name}.`
-            )
-          );
-        reader.readAsDataURL(blob);
-      });
 
-      return { dataUrl, mimeType: "image/png" };
+      return { blob, mimeType: "image/png" };
     } finally {
       stdoutBuffer = null;
       stderrCapture = null;

@@ -42,7 +42,7 @@ const MIN_DIMENSION = 1024;
 // remains sharp without bloating the API payload.
 const QUALITY_STEPS = [0.9, 0.86, 0.82];
 
-type PreparedEntry = { dataUrl: string; mimeType: string };
+export type PreparedEntry = { dataUrl: string; mimeType: string };
 
 // Cached per image id and dimension so retries, key/model rotations and the
 // quality fallback reuse the same prepared image instead of recompressing.
@@ -74,11 +74,18 @@ export async function prepareImageForApi(
   }
 
   try {
-    const compressed = await compressImageDataUrl(
-      image.dataUrl,
-      IMAGE_MAX_BYTES,
-      maxDimension
-    );
+    let compressed: PreparedEntry;
+    if (image.blob) {
+      compressed = await preparedImageFromBlob(image.blob, { maxDimension });
+    } else if (image.dataUrl) {
+      compressed = await compressImageDataUrl(
+        image.dataUrl,
+        IMAGE_MAX_BYTES,
+        maxDimension
+      );
+    } else {
+      throw new Error("The image has no readable source for analysis.");
+    }
     preparedCache.set(cacheKey, compressed);
     if (maxDimension === ANALYSIS_MAX_DIMENSION) {
       useAppStore.getState().updateImage(image.id, {
@@ -92,7 +99,10 @@ export async function prepareImageForApi(
       "[Image] Could not compress for the API, sending the original image",
       error
     );
-    return { dataUrl: image.dataUrl, mimeType: image.type };
+    return {
+      dataUrl: image.apiDataUrl ?? image.dataUrl ?? "",
+      mimeType: image.apiMimeType ?? image.type,
+    };
   }
 }
 
@@ -125,6 +135,49 @@ function loadImage(src: string): Promise<HTMLImageElement | ImageBitmap> {
     img.onerror = () =>
       reject(new Error("Could not read the image for compression."));
     img.src = src;
+  });
+}
+
+type BitmapSource = ImageBitmap | HTMLImageElement;
+
+function closeBitmap(image: BitmapSource): void {
+  if (typeof (image as ImageBitmap).close === "function") {
+    try {
+      (image as ImageBitmap).close();
+    } catch {
+      // Ignore bitmap teardown errors.
+    }
+  }
+}
+
+// Decode a Blob into a drawable image. createImageBitmap is preferred (fast,
+// off-main-thread capable); some formats (e.g. SVG) require the img element
+// on the main thread.
+async function loadBitmap(blob: Blob): Promise<BitmapSource> {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
+    closeBitmap(bitmap);
+  } catch {
+    // Fall through to the img-element loader below.
+  }
+  if (IS_WORKER) {
+    throw new Error("This file type cannot be decoded for analysis.");
+  }
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = typeof URL.createObjectURL === "function"
+      ? URL.createObjectURL(blob)
+      : "";
+    const img = new Image();
+    img.onload = () => {
+      if (url) URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      if (url) URL.revokeObjectURL(url);
+      reject(new Error("Could not read the image for compression."));
+    };
+    img.src = url;
   });
 }
 
@@ -162,9 +215,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function hasMeaningfulTransparency(
-  image: HTMLImageElement | ImageBitmap
-): boolean {
+function hasMeaningfulTransparency(image: BitmapSource): boolean {
   const maxDim = 64;
   const scale = Math.min(1, maxDim / Math.max(image.width, image.height));
   const width = Math.max(1, Math.round(image.width * scale));
@@ -186,25 +237,24 @@ function hasMeaningfulTransparency(
   return sampled > 0 && transparent / sampled > 0.01;
 }
 
-export async function compressImageDataUrl(
-  dataUrl: string,
-  targetMaxBytes: number,
-  maxDimension = ANALYSIS_MAX_DIMENSION,
-  opts: { preserveAlpha?: boolean } = {}
-): Promise<PreparedEntry> {
-  const image = await loadImage(dataUrl);
-  if (!image.width || !image.height) {
-    throw new Error("The image could not be loaded for compression.");
+function encodeFromBitmap(
+  image: BitmapSource,
+  opts: {
+    targetMaxBytes: number;
+    maxDimension?: number;
+    preserveAlpha?: boolean;
   }
-
+): Promise<PreparedEntry> {
+  const maxDimension = opts.maxDimension ?? ANALYSIS_MAX_DIMENSION;
+  const targetMaxBytes = opts.targetMaxBytes;
   const preserveAlpha = opts.preserveAlpha !== false;
-  const transparent = preserveAlpha && hasMeaningfulTransparency(image);
 
   // Never upscale: start from the original size capped at maxDimension.
   const largest = Math.max(image.width, image.height);
   let dimension = Math.min(maxDimension, largest);
+  const transparent = preserveAlpha && hasMeaningfulTransparency(image);
 
-  for (;;) {
+  const attempt = async (): Promise<PreparedEntry | null> => {
     const scale = dimension / largest;
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
@@ -240,11 +290,60 @@ export async function compressImageDataUrl(
         }
       }
     }
+    return null;
+  };
 
-    if (dimension > MIN_DIMENSION) {
-      dimension = Math.max(MIN_DIMENSION, Math.round(dimension * 0.75));
-      continue;
+  const stepDown = (): number | null => {
+    if (dimension <= MIN_DIMENSION) return null;
+    const next = Math.max(MIN_DIMENSION, Math.round(dimension * 0.75));
+    if (next >= dimension) return null;
+    dimension = next;
+    return dimension;
+  };
+
+  return (async () => {
+    for (;;) {
+      const entry = await attempt();
+      if (entry) return entry;
+      if (stepDown() === null) throw new ImageTooLargeError();
     }
-    throw new ImageTooLargeError();
+  })();
+}
+
+// Build a small, AI-ready analysis image straight from a Blob — no full-size
+// base64 intermediate is ever produced.
+export async function preparedImageFromBlob(
+  blob: Blob,
+  opts: { maxDimension?: number; targetMaxBytes?: number } = {}
+): Promise<PreparedEntry> {
+  const image = await loadBitmap(blob);
+  try {
+    return await encodeFromBitmap(image, {
+      maxDimension: opts.maxDimension ?? ANALYSIS_MAX_DIMENSION,
+      targetMaxBytes: opts.targetMaxBytes ?? IMAGE_MAX_BYTES,
+    });
+  } finally {
+    closeBitmap(image);
+  }
+}
+
+export async function compressImageDataUrl(
+  dataUrl: string,
+  targetMaxBytes: number,
+  maxDimension = ANALYSIS_MAX_DIMENSION,
+  opts: { preserveAlpha?: boolean } = {}
+): Promise<PreparedEntry> {
+  const image = await loadImage(dataUrl);
+  if (!image.width || !image.height) {
+    throw new Error("The image could not be loaded for compression.");
+  }
+  try {
+    return await encodeFromBitmap(image, {
+      targetMaxBytes,
+      maxDimension,
+      preserveAlpha: opts.preserveAlpha,
+    });
+  } finally {
+    closeBitmap(image);
   }
 }

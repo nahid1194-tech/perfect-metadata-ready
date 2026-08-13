@@ -5,12 +5,14 @@ import { AnimatePresence, motion } from "framer-motion"
 import { FileImage, ImagePlus, Loader2, X } from "lucide-react"
 
 import {
+  createAssetFromFile,
   formatBytes,
   isPreviewableType,
   isSupportedFile,
-  processUploadFiles,
+  processAssetsForAnalysis,
 } from "@/lib/upload-process"
 import { EPS_MAX_FILE_SIZE_MB } from "@/lib/image-process"
+import { logProfile } from "@/lib/perf"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { useAppStore } from "@/store/use-app-store"
@@ -20,7 +22,7 @@ const MAX_IMAGES = 100;
 
 type UploadItem = {
   file: File;
-  phase: "reading" | "compressing" | "converting";
+  phase: "preparing" | "converting";
   progress: number;
 };
 
@@ -66,7 +68,20 @@ export function ImageUpload() {
 
       if (accepted.length === 0) return;
 
-      setQueue(accepted.map((file) => ({ file, phase: "reading", progress: 0 })));
+      const selectionAt = performance.now();
+      const assets = accepted.map(createAssetFromFile);
+
+      setQueue(
+        accepted.map((file) => ({ file, phase: "preparing", progress: 0 }))
+      );
+
+      // Show every file immediately via a local object URL — no server
+      // upload, no AI processing and no full-file read before the UI updates.
+      addImages(assets);
+      logProfile(`upload:preview (${assets.length} files)`, {
+        select: performance.now() - selectionAt,
+      });
+
       const patchItem = (file: File, patch: Partial<UploadItem>) =>
         setQueue((current) =>
           current.map((item) =>
@@ -74,13 +89,16 @@ export function ImageUpload() {
           )
         );
 
-      const { assets, failures } = await processUploadFiles(
-        accepted,
-        patchItem,
-        (asset) => addImages([asset])
-      );
+      const failures = await processAssetsForAnalysis(assets, {
+        onItem: patchItem,
+        onReady: (assetId, patch) =>
+          useAppStore.getState().updateImage(assetId, patch),
+      });
 
       setQueue([]);
+      logProfile(`upload:ai-ready (${assets.length} files)`, {
+        total: performance.now() - selectionAt,
+      });
       for (const failure of failures) {
         toast(
           "error",
@@ -176,10 +194,10 @@ export function ImageUpload() {
             <div key={index} className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="min-w-0 truncate font-medium">{item.file.name}</span>
-                {item.phase === "compressing" || item.phase === "converting" ? (
+                {item.phase === "preparing" || item.phase === "converting" ? (
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" />
-                    {item.phase === "converting" ? "Converting…" : "Compressing…"}
+                    {item.phase === "converting" ? "Converting…" : "Preparing…"}
                   </span>
                 ) : (
                   <span className="shrink-0 text-muted-foreground tabular-nums">
@@ -188,10 +206,10 @@ export function ImageUpload() {
                 )}
               </div>
               <Progress
-                value={item.phase === "compressing" || item.phase === "converting" ? 100 : item.progress}
+                value={item.phase === "preparing" || item.phase === "converting" ? 100 : item.progress}
                 className="h-1"
                 indicatorClassName={
-                  item.phase === "compressing" || item.phase === "converting"
+                  item.phase === "preparing" || item.phase === "converting"
                     ? "animate-pulse bg-primary/70"
                     : undefined
                 }
@@ -233,7 +251,7 @@ export function ImageUpload() {
             <AnimatePresence initial={false}>
               {images.map((image) => {
                 const selected = selectedIds.includes(image.id);
-                const previewSrc = image.apiDataUrl ?? image.dataUrl;
+                const previewSrc = image.previewUrl ?? image.apiDataUrl ?? image.dataUrl;
                 return (
                   <motion.div
                     key={image.id}

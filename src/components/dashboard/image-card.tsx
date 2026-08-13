@@ -47,7 +47,7 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const image = images.find((item) => item.id === result.imageId);
   const previewable =
     image && (image.type.startsWith("image/") || image.type.startsWith("video/"));
-  const previewSrc = image?.apiDataUrl ?? image?.dataUrl;
+  const previewSrc = image?.previewUrl ?? image?.apiDataUrl ?? image?.dataUrl;
   const previewIsVideo = image?.type.startsWith("video/") ?? false;
 
   const patch = (field: keyof typeof metadata, value: string | string[]) =>
@@ -103,14 +103,14 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
             <div className="relative">
               {previewable && image.type.startsWith("video/") ? (
                 <video
-                  src={image.apiDataUrl ?? image.dataUrl}
+                  src={image.previewUrl ?? image.apiDataUrl ?? image.dataUrl}
                   muted
                   className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
                 />
               ) : previewable ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={image.apiDataUrl ?? image.dataUrl}
+                  src={image.previewUrl ?? image.apiDataUrl ?? image.dataUrl}
                   alt={result.imageName}
                   className="h-24 w-28 rounded-xl bg-muted object-cover ring-1 ring-foreground/10"
                 />

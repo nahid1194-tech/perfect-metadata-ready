@@ -4,20 +4,28 @@ import {
   EPS_MAX_FILE_SIZE_MB,
   IMAGE_MAX_BYTES,
   ImageTooLargeError,
-  compressImageDataUrl,
+  preparedImageFromBlob,
 } from "@/lib/image-process";
 import {
   isVectorFile,
   renderVectorToPng,
   VectorConversionError,
 } from "@/lib/eps-render";
+import { createObjectUrl, revokeObjectUrl } from "@/lib/object-url";
 import { createProfiler, logProfile } from "@/lib/perf";
 import type { ImageAsset } from "@/lib/types";
 
-// Bounded concurrency so many large files do not block the UI thread.
-const UPLOAD_CONCURRENCY = 4;
+// Bounded concurrency for image preparation so many large files do not block
+// the UI thread. This is separate from the AI generation concurrency (which
+// stays at exactly 2).
+const UPLOAD_CONCURRENCY = 3;
 
-export type UploadPhase = "reading" | "compressing" | "converting";
+// Files at or below this size are sent to the AI as-is (no decode, no
+// re-encode). Only larger/upscaled files are downscaled into an analysis
+// image, so normal uploads stay essentially instant.
+const USE_AS_IS_MAX_BYTES = 2 * 1024 * 1024;
+
+export type UploadPhase = "preparing" | "converting";
 
 export type UploadProgressItem = {
   file: File;
@@ -79,133 +87,201 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** index).toFixed(1)} ${units[index]}`;
 }
 
-function readFileAsDataUrl(
-  file: File,
-  onProgress: (progress: number) => void
-): Promise<string> {
+const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+};
+
+function mimeFor(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.replace(/.*\./, "").toLowerCase();
+  return EXT_MIME[ext] ?? "";
+}
+
+// Create an asset immediately from a picked file. The original is never read
+// into memory here: preview uses an object URL and the analysis image is
+// derived later in the background.
+export function createAssetFromFile(file: File): ImageAsset {
+  const previewUrl = createObjectUrl(file);
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    size: file.size,
+    type: mimeFor(file) || file.name.replace(/.*\./, ""),
+    previewUrl,
+    blob: file,
+  };
+}
+
+function base64FromBlob(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(Math.round((event.loaded / event.total) * 100));
-      }
-    };
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Could not read the file."));
-    reader.readAsDataURL(file);
+    reader.onerror = () => reject(new Error("Could not encode the file."));
+    reader.readAsDataURL(blob);
   });
 }
 
-export async function processUploadFiles(
-  files: File[],
-  onItem?: (file: File, patch: Partial<UploadProgressItem>) => void,
-  onAsset?: (asset: ImageAsset) => void
-): Promise<{ assets: ImageAsset[]; failures: UploadFailure[] }> {
-  const assets: ImageAsset[] = [];
-  const failures: UploadFailure[] = [];
+type OptimizeResult = {
+  patch: Partial<ImageAsset>;
+  failure: UploadFailure | null;
+};
 
-  const processFile = async (file: File): Promise<void> => {
-    const profiler = createProfiler();
+async function optimizeAsset(
+  asset: ImageAsset,
+  onItem?: (file: File, patch: Partial<UploadProgressItem>) => void
+): Promise<OptimizeResult> {
+  const file = asset.blob as File;
+  const profiler = createProfiler();
+
+  if (isVectorFile({ name: asset.name })) {
     try {
-      let dataUrl: string;
-      let apiDataUrl: string | undefined;
-      let apiMimeType: string | undefined;
-      let type = file.type || file.name.replace(/.*\./, "");
+      if (file.size > EPS_MAX_BYTES) {
+        throw new EpsTooLargeError(EPS_MAX_FILE_SIZE_MB);
+      }
+      onItem?.(file, { phase: "converting", progress: 0 });
+      profiler.start("render");
+      const rendered = await renderVectorToPng(file);
+      profiler.end("render");
 
-      if (isVectorFile(file)) {
-        if (file.size > EPS_MAX_BYTES) {
-          throw new EpsTooLargeError(EPS_MAX_FILE_SIZE_MB);
-        }
-        onItem?.(file, { phase: "converting", progress: 0 });
-        profiler.start("convert");
-        const rendered = await renderVectorToPng(file);
-        onItem?.(file, { phase: "converting", progress: 100 });
-        const compressed = await compressImageDataUrl(
-          rendered.dataUrl,
-          IMAGE_MAX_BYTES,
-          ANALYSIS_MAX_DIMENSION
-        );
-        profiler.end("convert");
-        dataUrl = compressed.dataUrl;
-        apiDataUrl = compressed.dataUrl;
-        apiMimeType = compressed.mimeType;
-        type = compressed.mimeType;
-      } else {
-        profiler.start("read");
-        dataUrl = await readFileAsDataUrl(file, (progress) =>
-          onItem?.(file, { phase: "reading", progress })
-        );
-        profiler.end("read");
-        if (isCompressibleFile(file)) {
-          onItem?.(file, { phase: "compressing", progress: 0 });
-          profiler.start("compress");
-          const compressed = await compressImageDataUrl(
-            dataUrl,
-            IMAGE_MAX_BYTES,
-            ANALYSIS_MAX_DIMENSION
-          );
-          profiler.end("compress");
-          apiDataUrl = compressed.dataUrl;
-          apiMimeType = compressed.mimeType;
-          type = compressed.mimeType;
-          onItem?.(file, { phase: "compressing", progress: 100 });
-        } else if (file.size > IMAGE_MAX_BYTES) {
+      const renderedUrl = createObjectUrl(rendered.blob);
+      revokeObjectUrl(asset.previewUrl);
+
+      profiler.start("optimize");
+      const compressed = await preparedImageFromBlob(rendered.blob, {
+        maxDimension: ANALYSIS_MAX_DIMENSION,
+      });
+      profiler.end("optimize");
+
+      onItem?.(file, { phase: "converting", progress: 100 });
+      logProfile(`${asset.name}:upload`, profiler.result());
+      return {
+        failure: null,
+        patch: {
+          previewUrl: renderedUrl,
+          blob: rendered.blob,
+          type: rendered.mimeType,
+          apiDataUrl: compressed.dataUrl,
+          apiMimeType: compressed.mimeType,
+          prepared: true,
+        },
+      };
+    } catch (error) {
+      return {
+        patch: {},
+        failure: {
+          name: asset.name,
+          tooLarge: error instanceof EpsTooLargeError,
+          kind: error instanceof VectorConversionError
+            ? "eps-render"
+            : error instanceof EpsTooLargeError
+              ? "eps-too-large"
+              : "generic",
+          message: error instanceof VectorConversionError
+            ? vectorRenderErrorMessage(asset.name)
+            : error instanceof EpsTooLargeError
+              ? error.message
+              : `${asset.name} could not be processed. ${
+                  error instanceof Error ? error.message : ""
+                }`,
+        },
+      };
+    }
+  }
+
+  const fileMime = mimeFor(file);
+  if (fileMime.startsWith("image/")) {
+    try {
+      onItem?.(file, { phase: "preparing", progress: 30 });
+
+      // Small/normal images are sent as-is: no decode, no re-encode.
+      if (file.size <= USE_AS_IS_MAX_BYTES || /\.svg$/i.test(asset.name)) {
+        if (file.size > IMAGE_MAX_BYTES) {
           throw new ImageTooLargeError(
-            `${file.name} is larger than 20 MB. This file type cannot be compressed for the API — use a file of 20 MB or less.`
+            `${asset.name} is larger than 20 MB. This file type cannot be compressed for the API — use a file of 20 MB or less.`
           );
         }
+        profiler.start("read");
+        const dataUrl = await base64FromBlob(file);
+        profiler.end("read");
+        onItem?.(file, { phase: "preparing", progress: 100 });
+        logProfile(`${asset.name}:upload`, profiler.result());
+        return {
+          failure: null,
+          patch: {
+            apiDataUrl: dataUrl,
+            apiMimeType: mimeFor(file),
+            prepared: true,
+          },
+        };
       }
 
-      const asset: ImageAsset = {
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        type,
-        dataUrl,
-        apiDataUrl,
-        apiMimeType,
+      profiler.start("optimize");
+      const compressed = await preparedImageFromBlob(file, {
+        maxDimension: ANALYSIS_MAX_DIMENSION,
+      });
+      profiler.end("optimize");
+
+      onItem?.(file, { phase: "preparing", progress: 100 });
+      logProfile(`${asset.name}:upload`, profiler.result());
+      return {
+        failure: null,
+        patch: {
+          apiDataUrl: compressed.dataUrl,
+          apiMimeType: compressed.mimeType,
+          prepared: true,
+        },
       };
-      assets.push(asset);
-      // Notify immediately so the thumbnail appears as soon as each file
-      // finishes, without waiting for the rest of the batch.
-      onAsset?.(asset);
-      logProfile(`${file.name}:upload`, profiler.result());
     } catch (error) {
-      const epsRenderFailure = error instanceof VectorConversionError;
-      const epsTooLarge = error instanceof EpsTooLargeError;
-      const rasterTooLarge = error instanceof ImageTooLargeError;
-      failures.push({
-        name: file.name,
-        tooLarge: epsTooLarge || rasterTooLarge,
-        kind: epsRenderFailure
-          ? "eps-render"
-          : epsTooLarge
-            ? "eps-too-large"
-            : rasterTooLarge
-              ? "too-large"
-              : "generic",
-        message: epsRenderFailure
-          ? vectorRenderErrorMessage(file.name)
-          : epsTooLarge || rasterTooLarge
+      return {
+        patch: {},
+        failure: {
+          name: asset.name,
+          tooLarge: error instanceof ImageTooLargeError,
+          kind: error instanceof ImageTooLargeError ? "too-large" : "generic",
+          message: error instanceof ImageTooLargeError
             ? error.message
-            : `${file.name} could not be processed. ${
+            : `${asset.name} could not be processed. ${
                 error instanceof Error ? error.message : ""
               }`,
-      });
+        },
+      };
     }
-  };
+  }
+
+  // Videos keep their local object URL for preview; nothing to optimize.
+  return { patch: {}, failure: null };
+}
+
+export async function processAssetsForAnalysis(
+  assets: ImageAsset[],
+  opts: {
+    onItem?: (file: File, patch: Partial<UploadProgressItem>) => void;
+    onReady?: (assetId: string, patch: Partial<ImageAsset>) => void;
+  } = {}
+): Promise<UploadFailure[]> {
+  const failures: UploadFailure[] = [];
 
   let nextIndex = 0;
   const workers = Array.from(
-    { length: Math.min(UPLOAD_CONCURRENCY, files.length) },
+    { length: Math.min(UPLOAD_CONCURRENCY, assets.length) },
     async () => {
-      while (nextIndex < files.length) {
+      for (;;) {
         const index = nextIndex++;
-        await processFile(files[index]);
+        if (index >= assets.length) return;
+        const asset = assets[index];
+        const { patch, failure } = await optimizeAsset(asset, opts.onItem);
+        if (failure) failures.push(failure);
+        opts.onReady?.(asset.id, patch);
       }
     }
   );
   await Promise.all(workers);
 
-  return { assets, failures };
+  return failures;
 }

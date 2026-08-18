@@ -9,6 +9,8 @@ export type ImageAsset = {
   dataUrl?: string;
   /** Optimized analysis image (base64 data URL) sent to the AI. */
   apiDataUrl?: string;
+  /** Compressed analysis blob — deferred base64 conversion at generation time. */
+  apiBlob?: Blob;
   apiMimeType?: string;
   /** Object URL for instant local preview of the original file. */
   previewUrl?: string;

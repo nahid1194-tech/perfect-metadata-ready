@@ -57,6 +57,11 @@ export async function imageContentHash(image: ImageAsset): Promise<string> {
     if (image.apiDataUrl) {
       return sha256Hex(base64ToBytes(base64ToData(image.apiDataUrl)));
     }
+    // Deferred base64: a compressed Blob was stored during upload. Hash
+    // the blob bytes directly (faster than converting to base64 first).
+    if (image.apiBlob) {
+      return sha256Hex(new Uint8Array(await image.apiBlob.arrayBuffer()));
+    }
     if (image.blob) {
       return sha256Hex(new Uint8Array(await image.blob.arrayBuffer()));
     }

@@ -43,6 +43,7 @@ const MIN_DIMENSION = 1024;
 const QUALITY_STEPS = [0.9, 0.86, 0.82];
 
 export type PreparedEntry = { dataUrl: string; mimeType: string };
+export type PreparedBlobEntry = { blob: Blob; mimeType: string };
 
 // Cached per image id and dimension so retries, key/model rotations and the
 // quality fallback reuse the same prepared image instead of recompressing.
@@ -70,6 +71,25 @@ export async function prepareImageForApi(
   ) {
     const entry = { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
     preparedCache.set(cacheKey, entry);
+    return entry;
+  }
+
+  // Deferred base64: a compressed Blob was stored during upload. Convert it
+  // to a data URL once on demand and cache the result.
+  if (
+    image.apiBlob &&
+    image.apiMimeType &&
+    maxDimension === ANALYSIS_MAX_DIMENSION
+  ) {
+    const dataUrl = await blobToDataUrl(image.apiBlob);
+    const entry = { dataUrl, mimeType: image.apiMimeType };
+    preparedCache.set(cacheKey, entry);
+    if (maxDimension === ANALYSIS_MAX_DIMENSION) {
+      useAppStore.getState().updateImage(image.id, {
+        apiDataUrl: dataUrl,
+        apiMimeType: image.apiMimeType,
+      });
+    }
     return entry;
   }
 
@@ -237,14 +257,14 @@ function hasMeaningfulTransparency(image: BitmapSource): boolean {
   return sampled > 0 && transparent / sampled > 0.01;
 }
 
-function encodeFromBitmap(
+function encodeBlobFromBitmap(
   image: BitmapSource,
   opts: {
     targetMaxBytes: number;
     maxDimension?: number;
     preserveAlpha?: boolean;
   }
-): Promise<PreparedEntry> {
+): Promise<PreparedBlobEntry> {
   const maxDimension = opts.maxDimension ?? ANALYSIS_MAX_DIMENSION;
   const targetMaxBytes = opts.targetMaxBytes;
   const preserveAlpha = opts.preserveAlpha !== false;
@@ -254,7 +274,7 @@ function encodeFromBitmap(
   let dimension = Math.min(maxDimension, largest);
   const transparent = preserveAlpha && hasMeaningfulTransparency(image);
 
-  const attempt = async (): Promise<PreparedEntry | null> => {
+  const attempt = async (): Promise<PreparedBlobEntry | null> => {
     const scale = dimension / largest;
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
@@ -268,25 +288,22 @@ function encodeFromBitmap(
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, width, height);
 
-    // Preserve alpha for transparent images: PNG first, then WebP (both keep
-    // the alpha channel). Never flatten to JPEG so the analysis can still
-    // detect the transparency accurately.
     if (transparent) {
       const png = await canvasToBlob(canvas, "image/png", QUALITY_STEPS[0]);
       if (png && png.size <= targetMaxBytes) {
-        return { dataUrl: await blobToDataUrl(png), mimeType: "image/png" };
+        return { blob: png, mimeType: "image/png" };
       }
       for (const quality of QUALITY_STEPS) {
         const webp = await canvasToBlob(canvas, "image/webp", quality);
         if (webp && webp.size <= targetMaxBytes) {
-          return { dataUrl: await blobToDataUrl(webp), mimeType: "image/webp" };
+          return { blob: webp, mimeType: "image/webp" };
         }
       }
     } else {
       for (const quality of QUALITY_STEPS) {
         const blob = await canvasToBlob(canvas, "image/jpeg", quality);
         if (blob && blob.size <= targetMaxBytes) {
-          return { dataUrl: await blobToDataUrl(blob), mimeType: "image/jpeg" };
+          return { blob, mimeType: "image/jpeg" };
         }
       }
     }
@@ -310,6 +327,20 @@ function encodeFromBitmap(
   })();
 }
 
+function encodeFromBitmap(
+  image: BitmapSource,
+  opts: {
+    targetMaxBytes: number;
+    maxDimension?: number;
+    preserveAlpha?: boolean;
+  }
+): Promise<PreparedEntry> {
+  return encodeBlobFromBitmap(image, opts).then(async (entry) => ({
+    dataUrl: await blobToDataUrl(entry.blob),
+    mimeType: entry.mimeType,
+  }));
+}
+
 // Build a small, AI-ready analysis image straight from a Blob — no full-size
 // base64 intermediate is ever produced.
 export async function preparedImageFromBlob(
@@ -319,6 +350,23 @@ export async function preparedImageFromBlob(
   const image = await loadBitmap(blob);
   try {
     return await encodeFromBitmap(image, {
+      maxDimension: opts.maxDimension ?? ANALYSIS_MAX_DIMENSION,
+      targetMaxBytes: opts.targetMaxBytes ?? IMAGE_MAX_BYTES,
+    });
+  } finally {
+    closeBitmap(image);
+  }
+}
+
+// Like preparedImageFromBlob but returns a Blob instead of a base64 data URL.
+// The base64 conversion is deferred to generation time, keeping upload fast.
+export async function prepareCompressedBlob(
+  blob: Blob,
+  opts: { maxDimension?: number; targetMaxBytes?: number } = {}
+): Promise<PreparedBlobEntry> {
+  const image = await loadBitmap(blob);
+  try {
+    return await encodeBlobFromBitmap(image, {
       maxDimension: opts.maxDimension ?? ANALYSIS_MAX_DIMENSION,
       targetMaxBytes: opts.targetMaxBytes ?? IMAGE_MAX_BYTES,
     });

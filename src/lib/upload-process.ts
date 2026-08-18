@@ -4,7 +4,7 @@ import {
   EPS_MAX_FILE_SIZE_MB,
   IMAGE_MAX_BYTES,
   ImageTooLargeError,
-  preparedImageFromBlob,
+  prepareCompressedBlob,
 } from "@/lib/image-process";
 import {
   isVectorFile,
@@ -16,9 +16,8 @@ import { createProfiler, logProfile } from "@/lib/perf";
 import type { ImageAsset } from "@/lib/types";
 
 // Bounded concurrency for image preparation so many large files do not block
-// the UI thread. This is separate from the AI generation concurrency (which
-// stays at exactly 2).
-const UPLOAD_CONCURRENCY = 3;
+// the UI thread. This is separate from the AI generation concurrency.
+const UPLOAD_CONCURRENCY = 4;
 
 // Files at or below this size are sent to the AI as-is (no decode, no
 // re-encode). Only larger/upscaled files are downscaled into an analysis
@@ -118,15 +117,6 @@ export function createAssetFromFile(file: File): ImageAsset {
   };
 }
 
-function base64FromBlob(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Could not encode the file."));
-    reader.readAsDataURL(blob);
-  });
-}
-
 type OptimizeResult = {
   patch: Partial<ImageAsset>;
   failure: UploadFailure | null;
@@ -138,6 +128,7 @@ async function optimizeAsset(
 ): Promise<OptimizeResult> {
   const file = asset.blob as File;
   const profiler = createProfiler();
+  const t0 = performance.now();
 
   if (isVectorFile({ name: asset.name })) {
     try {
@@ -152,21 +143,24 @@ async function optimizeAsset(
       const renderedUrl = createObjectUrl(rendered.blob);
       revokeObjectUrl(asset.previewUrl);
 
-      profiler.start("optimize");
-      const compressed = await preparedImageFromBlob(rendered.blob, {
+      profiler.start("compress");
+      const compressed = await prepareCompressedBlob(rendered.blob, {
         maxDimension: ANALYSIS_MAX_DIMENSION,
       });
-      profiler.end("optimize");
+      profiler.end("compress");
 
       onItem?.(file, { phase: "converting", progress: 100 });
       logProfile(`${asset.name}:upload`, profiler.result());
+      console.log(
+        `[Upload] ${asset.name}: EPS→PNG→Blob in ${(performance.now() - t0).toFixed(0)}ms (blob=${formatBytes(compressed.blob.size)})`
+      );
       return {
         failure: null,
         patch: {
           previewUrl: renderedUrl,
           blob: rendered.blob,
           type: rendered.mimeType,
-          apiDataUrl: compressed.dataUrl,
+          apiBlob: compressed.blob,
           apiMimeType: compressed.mimeType,
           prepared: true,
         },
@@ -199,40 +193,44 @@ async function optimizeAsset(
     try {
       onItem?.(file, { phase: "preparing", progress: 30 });
 
-      // Small/normal images are sent as-is: no decode, no re-encode.
+      // Small/normal images: store the original File directly as apiBlob.
+      // No decode, no re-encode, no base64 conversion — zero overhead.
       if (file.size <= USE_AS_IS_MAX_BYTES || /\.svg$/i.test(asset.name)) {
         if (file.size > IMAGE_MAX_BYTES) {
           throw new ImageTooLargeError(
             `${asset.name} is larger than 20 MB. This file type cannot be compressed for the API — use a file of 20 MB or less.`
           );
         }
-        profiler.start("read");
-        const dataUrl = await base64FromBlob(file);
-        profiler.end("read");
         onItem?.(file, { phase: "preparing", progress: 100 });
         logProfile(`${asset.name}:upload`, profiler.result());
+        console.log(
+          `[Upload] ${asset.name}: stored as-is in ${(performance.now() - t0).toFixed(0)}ms (size=${formatBytes(file.size)})`
+        );
         return {
           failure: null,
           patch: {
-            apiDataUrl: dataUrl,
+            apiBlob: file,
             apiMimeType: mimeFor(file),
             prepared: true,
           },
         };
       }
 
-      profiler.start("optimize");
-      const compressed = await preparedImageFromBlob(file, {
+      profiler.start("compress");
+      const compressed = await prepareCompressedBlob(file, {
         maxDimension: ANALYSIS_MAX_DIMENSION,
       });
-      profiler.end("optimize");
+      profiler.end("compress");
 
       onItem?.(file, { phase: "preparing", progress: 100 });
       logProfile(`${asset.name}:upload`, profiler.result());
+      console.log(
+        `[Upload] ${asset.name}: compressed in ${(performance.now() - t0).toFixed(0)}ms (original=${formatBytes(file.size)} → blob=${formatBytes(compressed.blob.size)})`
+      );
       return {
         failure: null,
         patch: {
-          apiDataUrl: compressed.dataUrl,
+          apiBlob: compressed.blob,
           apiMimeType: compressed.mimeType,
           prepared: true,
         },

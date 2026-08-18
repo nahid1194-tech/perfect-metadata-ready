@@ -55,7 +55,6 @@ export function UploadToolbar() {
   const platform = useAppStore((state) => state.settings.platform);
   const progress = useAppStore((state) => state.progress);
   const debugStatus = useAppStore((state) => state.debugStatus);
-  const activeImageId = useAppStore((state) => state.activeImageId);
   const gitPushStatus = useAppStore((state) => state.gitPushStatus);
   const { run, stop, generating, queueState } = useGenerate();
 
@@ -287,22 +286,29 @@ export function UploadToolbar() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-        <StatTile label="Uploaded" value={uploaded} />
-        <StatTile label="Completed" value={completedCount} accent />
-        <StatTile label="Generating" value={generatingCount} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <StatTile label="Generated" value={`${completedCount} / ${uploaded}`} accent />
+        <StatTile label="Processing" value={generatingCount} />
+        <StatTile label="Waiting" value={remainingCount} />
         <StatTile label="Failed" value={failedCount} />
-        <StatTile label="Remaining" value={remainingCount} />
-        <StatTile label="Progress" value={`${Math.min(100, progressPct)}%`} />
       </div>
 
       {generating ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-blue-100/85">
           <span className="flex items-center gap-1.5">
             <Loader2 className="size-3 animate-spin" />
-            Current:{" "}
-            {images.find((image) => image.id === activeImageId)?.name ??
-              "Preparing…"}
+            Analyzing:{" "}
+            {(() => {
+              const activeNames = Object.values(queueItems)
+                .filter((item) =>
+                  ["analyzing", "generating", "retrying"].includes(item.status)
+                )
+                .map((item) => images.find((image) => image.id === item.imageId)?.name)
+                .filter(Boolean);
+              return activeNames.length > 0
+                ? activeNames.join(", ")
+                : "Preparing…";
+            })()}
           </span>
           {debugStatus.activeProvider ? (
             <span>

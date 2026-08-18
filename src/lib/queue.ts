@@ -67,7 +67,7 @@ let backoffAttempt = 0;
 const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 
 // Maximum number of images processed with a live AI request at the same time.
-export const MAX_CONCURRENT_GENERATIONS = 2;
+export const MAX_CONCURRENT_GENERATIONS = 4;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

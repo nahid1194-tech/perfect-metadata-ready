@@ -43,6 +43,8 @@ export type GenerationResult = {
   createdAt: string;
   imageName: string;
   metadata: GeneratedMetadata;
+  qualityScore?: number;
+  timingMs?: Record<string, number>;
 };
 
 export type CsvFormat = "adobe" | "shutterstock";

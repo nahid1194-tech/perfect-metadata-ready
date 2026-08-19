@@ -41,6 +41,7 @@ import {
   parseAnalysis,
 } from "@/lib/prompts";
 import {
+  computeQualityScore,
   validateGeneratedMetadata,
   type ValidationReport,
 } from "@/lib/metadata-validator";
@@ -951,7 +952,11 @@ async function runGenerationPipeline(args: {
     includeImage?: boolean,
     dimension?: number
   ) => Promise<string>;
-}): Promise<GeneratedMetadata> {
+}): Promise<{
+  metadata: GeneratedMetadata;
+  report: ValidationReport;
+  timing: Record<string, number>;
+}> {
   const { image, fallback, settings, platform, call } = args;
   const profiler = createProfiler();
 
@@ -1078,7 +1083,7 @@ async function runGenerationPipeline(args: {
   const primary = await runPass(ANALYSIS_MAX_DIMENSION);
   if (primary.report.errors.length === 0) {
     logProfile(`${image.name}:generate`, profiler.result());
-    return primary.metadata;
+    return { metadata: primary.metadata, report: primary.report, timing: profiler.result() };
   }
 
   // Pass 2 (quality fallback): re-run the full pass once at a higher
@@ -1095,7 +1100,7 @@ async function runGenerationPipeline(args: {
         name: image.name,
       });
       logProfile(`${image.name}:generate`, profiler.result());
-      return quality.metadata;
+      return { metadata: quality.metadata, report: quality.report, timing: profiler.result() };
     }
     devLog({
       event: "validation-remaining",
@@ -1193,7 +1198,7 @@ async function analysisImageParts(
 export async function generateWithApi(
   image: ImageAsset,
   apiKey: string,
-  model = "gemini-2.5-flash",
+  model = "gemini-3.6-flash",
   settings: Partial<GenerationSettings> = {},
   signal?: AbortSignal
 ): Promise<GenerationResult> {
@@ -1203,7 +1208,7 @@ export async function generateWithApi(
   };
   const fallback = buildNeutralMetadata();
 
-  const metadata = await runGenerationPipeline({
+  const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
@@ -1222,7 +1227,9 @@ export async function generateWithApi(
     imageId: image.id,
     createdAt: new Date().toISOString(),
     imageName: image.name,
-    metadata: applySettings(metadata, fullSettings),
+    metadata: applySettings(pipeline.metadata, fullSettings),
+    qualityScore: computeQualityScore(pipeline.metadata, pipeline.report),
+    timingMs: pipeline.timing,
   };
 }
 
@@ -1303,7 +1310,7 @@ export async function generateWithOpenAI(
   };
   const fallback = buildNeutralMetadata();
 
-  const metadata = await runGenerationPipeline({
+  const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
@@ -1328,7 +1335,9 @@ export async function generateWithOpenAI(
     imageId: image.id,
     createdAt: new Date().toISOString(),
     imageName: image.name,
-    metadata: applySettings(metadata, fullSettings),
+    metadata: applySettings(pipeline.metadata, fullSettings),
+    qualityScore: computeQualityScore(pipeline.metadata, pipeline.report),
+    timingMs: pipeline.timing,
   };
 }
 
@@ -1408,7 +1417,7 @@ export async function generateWithMistral(
   };
   const fallback = buildNeutralMetadata();
 
-  const metadata = await runGenerationPipeline({
+  const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
@@ -1433,6 +1442,8 @@ export async function generateWithMistral(
     imageId: image.id,
     createdAt: new Date().toISOString(),
     imageName: image.name,
-    metadata: applySettings(metadata, fullSettings),
+    metadata: applySettings(pipeline.metadata, fullSettings),
+    qualityScore: computeQualityScore(pipeline.metadata, pipeline.report),
+    timingMs: pipeline.timing,
   };
 }

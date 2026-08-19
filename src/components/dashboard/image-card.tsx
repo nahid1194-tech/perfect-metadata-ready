@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react"
 import { motion } from "framer-motion"
-import { FileImage, Loader2, Maximize2, RefreshCw, Trash2 } from "lucide-react"
+import { ChevronDown, FileImage, Loader2, Maximize2, RefreshCw, Trash2 } from "lucide-react"
 
 import type { GenerationResult } from "@/lib/types"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
@@ -30,6 +30,12 @@ import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
 
+function qualityColor(score: number): string {
+  if (score >= 90) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+  if (score >= 70) return "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+  return "bg-red-500/15 text-red-700 dark:text-red-400"
+}
+
 export const ImageCard = memo(function ImageCard({ result }: { result: GenerationResult }) {
   const platform = useAppStore((state) => state.settings.platform);
   const images = useAppStore((state) => state.images);
@@ -38,6 +44,7 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const { regenerate } = useGenerate();
   const [regenerating, setRegenerating] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [timingOpen, setTimingOpen] = useState(false);
 
   const format = marketplaceFormat(platform);
   const metadata = result.metadata[format];
@@ -139,6 +146,14 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
           <p className="min-w-0 flex-1 truncate pt-1 text-sm font-medium">
             {result.imageName}
           </p>
+          {result.qualityScore != null ? (
+            <Badge
+              variant="secondary"
+              className={cn("shrink-0 text-xs font-semibold", qualityColor(result.qualityScore))}
+            >
+              {result.qualityScore}/100
+            </Badge>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-3">
@@ -227,6 +242,16 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
             {regenerating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             Regenerate
           </Button>
+          {result.timingMs && Object.keys(result.timingMs).length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTimingOpen((o) => !o)}
+            >
+              <ChevronDown className={cn("size-3 transition-transform", timingOpen && "rotate-180")} />
+              Timing
+            </Button>
+          ) : null}
           <div className="flex-1" />
           <Button
             variant="ghost"
@@ -238,6 +263,21 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
             Delete
           </Button>
         </div>
+        {timingOpen && result.timingMs ? (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg bg-muted/50 p-2 font-mono text-xs text-muted-foreground sm:grid-cols-3">
+            {Object.entries(result.timingMs)
+              .filter(([, ms]) => ms >= 1)
+              .sort(([, a], [, b]) => b - a)
+              .map(([key, ms]) => (
+                <div key={key} className="flex items-center justify-between gap-1">
+                  <span className="truncate">{key}</span>
+                  <span className="shrink-0 font-semibold text-foreground">
+                    {(ms / 1000).toFixed(1)}s
+                  </span>
+                </div>
+              ))}
+          </div>
+        ) : null}
       </div>
     </motion.article>
 

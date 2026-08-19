@@ -12,7 +12,7 @@
  *
  * OPTIONS
  *   --keys k1,k2,k3    Gemini API keys (default: env GEMINI_API_KEYS or GEMINI_API_KEY)
- *   --model NAME       Model id (default: gemini-1.5-flash)
+ *   --model NAME       Model id (default: gemini-3.6-flash)
  *   --delay SECONDS    Min interval between requests per key (default: 1.8)
  *   --keywords N       Exact tag count, 1..49 (default: 49)
  *   --max-retries N    Retries per image (default: 4)
@@ -50,7 +50,7 @@ import {
   resolve,
 } from "node:path";
 
-const DEFAULT_MODEL = "gemini-1.5-flash";
+const DEFAULT_MODEL = "gemini-3.6-flash";
 const DEFAULT_KEYWORD_COUNT = 49;
 const MAX_TITLE_CHARS = 70;
 const DEFAULT_DELAY_MS = 1800;

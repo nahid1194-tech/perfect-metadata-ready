@@ -8,9 +8,10 @@ import { useAppStore } from "@/store/use-app-store";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export const DEFAULT_HEALTH_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ];
 
 export const QUOTA_COOLDOWN_MS = 30 * 60 * 1000;

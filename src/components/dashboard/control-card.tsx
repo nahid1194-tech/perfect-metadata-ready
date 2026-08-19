@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, KeyRound, Sparkles, Zap } from "lucide-react"
+import { ChevronDown, KeyRound, Sparkles, Zap, Clock, AlertTriangle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { bestModelFor } from "@/lib/models"
@@ -27,6 +27,37 @@ function Diag({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ErrorLog() {
+  const queueItems = useAppStore((state) => state.queueItems);
+  const failedIds = useAppStore((state) => state.failedImageIds);
+  const images = useAppStore((state) => state.images);
+
+  const failedItems = failedIds
+    .map((id) => {
+      const item = queueItems[id];
+      const image = images.find((img) => img.id === id);
+      return item && item.error
+        ? { id, name: image?.name ?? id, error: item.error }
+        : null;
+    })
+    .filter(Boolean) as { id: string; name: string; error: string }[];
+
+  if (failedItems.length === 0) {
+    return <p className="text-xs text-muted-foreground">No errors.</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {failedItems.map((item) => (
+        <div key={item.id} className="rounded-lg bg-destructive/5 p-2">
+          <p className="truncate text-xs font-medium text-foreground">{item.name}</p>
+          <p className="break-words text-xs text-destructive">{item.error}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ControlCard() {
   const apiKeys = useAppStore((state) => state.apiKeys);
   const generating = useAppStore((state) => state.generating);
@@ -37,6 +68,9 @@ export function ControlCard() {
   const activeImageId = useAppStore((state) => state.activeImageId);
   const queueItems = useAppStore((state) => state.queueItems);
   const [keysOpen, setKeysOpen] = useState(false);
+  const [perfOpen, setPerfOpen] = useState(false);
+  const [errorsOpen, setErrorsOpen] = useState(false);
+  const results = useAppStore((state) => state.results);
   const geminiKeyCount = apiKeys.filter(
     (entry) =>
       entry.provider === "gemini" && entry.enabled && entry.key.trim().length > 0
@@ -139,6 +173,82 @@ export function ControlCard() {
               value={generating ? `${batchCompleted}/${batchTotal}` : "Idle"}
             />
           </div>
+        </div>
+      ) : null}
+
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-between"
+        onClick={() => setPerfOpen((open) => !open)}
+        aria-expanded={perfOpen}
+      >
+        <span className="flex items-center gap-2">
+          <Clock />
+          Performance
+        </span>
+        <ChevronDown
+          className={cn("size-4 transition-transform", perfOpen && "rotate-180")}
+        />
+      </Button>
+
+      {perfOpen ? (
+        <div className="rounded-xl border bg-background/60 p-3">
+          {results.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No results yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {results.slice(-5).reverse().map((r) => {
+                const totalMs = r.timingMs
+                  ? Object.values(r.timingMs).reduce((s, v) => s + v, 0)
+                  : null;
+                return (
+                  <div key={r.id} className="flex items-center justify-between gap-2 font-mono text-xs">
+                    <span className="truncate text-muted-foreground">{r.imageName}</span>
+                    <span className="shrink-0 flex items-center gap-2">
+                      {r.qualityScore != null ? (
+                        <Badge variant="secondary" className={cn(
+                          "text-[10px]",
+                          r.qualityScore >= 90
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                            : r.qualityScore >= 70
+                              ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                              : "bg-red-500/15 text-red-700 dark:text-red-400"
+                        )}>
+                          {r.qualityScore}
+                        </Badge>
+                      ) : null}
+                      {totalMs != null ? (
+                        <span className="text-muted-foreground">{(totalMs / 1000).toFixed(1)}s</span>
+                      ) : null}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-between"
+        onClick={() => setErrorsOpen((open) => !open)}
+        aria-expanded={errorsOpen}
+      >
+        <span className="flex items-center gap-2">
+          <AlertTriangle />
+          Error Log
+        </span>
+        <ChevronDown
+          className={cn("size-4 transition-transform", errorsOpen && "rotate-180")}
+        />
+      </Button>
+
+      {errorsOpen ? (
+        <div className="rounded-xl border bg-background/60 p-3">
+          <ErrorLog />
         </div>
       ) : null}
 

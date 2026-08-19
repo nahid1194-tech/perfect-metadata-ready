@@ -504,3 +504,44 @@ export function validateGeneratedMetadata(
 
   return { errors, warnings };
 }
+
+export function computeQualityScore(
+  metadata: GeneratedMetadata,
+  report: ValidationReport
+): number {
+  let score = 100;
+
+  for (const issue of report.errors) {
+    if (issue.component === "title") score -= 8;
+    else if (issue.component === "keywords") score -= 4;
+    else if (issue.component === "category") score -= 6;
+    else if (issue.component === "description") score -= 5;
+    else score -= 3;
+  }
+  for (const issue of report.warnings) {
+    if (issue.component === "title") score -= 2;
+    else if (issue.component === "keywords") score -= 1;
+    else score -= 1;
+  }
+
+  const adobeKw = metadata.adobe.keywords;
+  const adobeSingle = adobeKw.filter((k) => k.split(/\s+/).length === 1).length;
+  if (adobeKw.length > 0) {
+    const singleRatio = adobeSingle / adobeKw.length;
+    if (singleRatio < 0.4) score -= 3;
+    else if (singleRatio > 0.7) score += 2;
+  }
+
+  const adobeTitle = metadata.adobe.title.trim();
+  if (adobeTitle.length > 0) {
+    const words = adobeTitle.split(/\s+/);
+    const uniqueWords = new Set(words.map((w) => w.toLowerCase()));
+    if (words.length > 3 && uniqueWords.size < words.length * 0.6) score -= 4;
+    if (adobeTitle.length <= 60) score += 1;
+  }
+
+  const shutterKw = metadata.shutterstock.keywords;
+  if (shutterKw.length >= 7 && shutterKw.length <= 50) score += 1;
+
+  return Math.max(0, Math.min(100, score));
+}

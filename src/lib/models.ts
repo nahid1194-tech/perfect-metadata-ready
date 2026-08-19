@@ -16,12 +16,13 @@ type GeminiModelEntry = {
   displayName?: string;
   supportedGenerationMethods?: string[];
   supportedActions?: string[];
+  supportedInputModalities?: string[];
   version?: string;
   description?: string;
 };
 
 const GEMINI_BLOCKLIST =
-  /preview|experimental|thinking|embedding|embed|imagen|veo|aqa|draft|deprecated|beta|live|realtime|tts|audio|voice|code|search|^gemini-1\.0/i;
+  /preview|experimental|thinking|embedding|embed|imagen|veo|aqa|draft|deprecated|beta|live|realtime|tts|audio|voice|^gemini-1\.0/i;
 
 function isGeminiVisionModel(entry: GeminiModelEntry): boolean {
   const name = entry.name?.replace(/^models\//, "") ?? "";
@@ -30,6 +31,14 @@ function isGeminiVisionModel(entry: GeminiModelEntry): boolean {
   const methods =
     entry.supportedGenerationMethods ?? entry.supportedActions ?? [];
   if (methods.length > 0 && !methods.includes("generateContent")) {
+    return false;
+  }
+  const modalities = entry.supportedInputModalities;
+  if (
+    Array.isArray(modalities) &&
+    modalities.length > 0 &&
+    !modalities.some((modality) => modality.toUpperCase().includes("IMAGE"))
+  ) {
     return false;
   }
   return true;
@@ -41,22 +50,52 @@ function geminiVersionRank(id: string): number {
   return Number(match[1]) * 1000 + Number(match[2]) * 100;
 }
 
-function geminiQualityRank(id: string): number {
+// Practical-speed tier for Gemini: flash is the fastest model with sufficient
+// vision quality, then flash-lite (fastest, lighter vision), then pro (slower,
+// strongest vision). Newer versions win within a tier.
+function geminiSpeedTier(id: string): number {
+  if (/flash-lite/.test(id)) return 1;
+  if (/flash/.test(id)) return 0;
+  if (/pro/.test(id)) return 2;
+  if (/nano/.test(id)) return 3;
+  return 4;
+}
+
+// Ranking for Gemini models: newer versions win, then within the same version
+// flash (best speed/quality balance) > flash-lite (fastest, lighter) > pro
+// (slowest, strongest). Lower rank = higher priority.
+function geminiSpeedRank(id: string): number {
   const version = geminiVersionRank(id);
-  if (version === 0) return version;
-  let score = version;
-  if (/pro/.test(id)) score += 50;
-  else if (/flash-lite|nano/.test(id)) score -= 30;
-  return score;
+  const tier = geminiSpeedTier(id);
+  return -(version * 10 + tier);
+}
+
+// Higher tier = higher vision/metadata quality. Used by the queue to jump to
+// the next higher-quality model when the fastest model fails validation.
+export function modelQualityTier(provider: ApiProvider, model: string): number {
+  if (provider === "gemini") {
+    if (/pro/.test(model)) return 3;
+    if (/flash-lite/.test(model)) return 1;
+    if (/flash/.test(model)) return 2;
+    if (/nano/.test(model)) return 0;
+    return 2;
+  }
+  if (provider === "openai") {
+    return /(?:-mini|-turbo|-flash)/i.test(model) ? 1 : 2;
+  }
+  if (provider === "mistral") {
+    return /12b|medium/i.test(model) ? 1 : 2;
+  }
+  return 2;
 }
 
 const OPENAI_VISION_PRIORITY: Record<string, number> = {
-  "gpt-5": 1,
-  "gpt-5-mini": 2,
-  "gpt-4.1": 3,
-  "gpt-4.1-mini": 4,
-  "gpt-4o": 5,
-  "gpt-4o-mini": 6,
+  "gpt-5-mini": 1,
+  "gpt-4.1-mini": 2,
+  "gpt-4o-mini": 3,
+  "gpt-5": 4,
+  "gpt-4.1": 5,
+  "gpt-4o": 6,
   "gpt-4-turbo": 7,
 };
 
@@ -78,7 +117,7 @@ async function fetchGeminiModels(apiKey: string): Promise<string[]> {
   return (data?.models ?? [])
     .filter(isGeminiVisionModel)
     .map((entry) => entry.name?.replace(/^models\//, "") ?? "")
-    .sort((a, b) => geminiQualityRank(b) - geminiQualityRank(a));
+    .sort((a, b) => geminiSpeedRank(a) - geminiSpeedRank(b));
 }
 
 export async function discoverKeyModels(

@@ -821,7 +821,7 @@ export async function runQueue(
     }
   };
 
-  const CONCURRENCY = MAX_CONCURRENT_GENERATIONS;
+  const CONCURRENCY = Math.max(1, Math.min(8, store.settings.maxConcurrent || MAX_CONCURRENT_GENERATIONS));
 
   const runConcurrent = async (items: ImageAsset[]): Promise<void> => {
     let nextIndex = 0;

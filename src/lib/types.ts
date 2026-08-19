@@ -206,6 +206,7 @@ export type GenerationSettings = {
   enableSuffix: boolean;
   enableNegativeTitleWords: boolean;
   enableNegativeKeywords: boolean;
+  maxConcurrent: number;
 };
 
 export type GitSyncConfig = {

@@ -366,6 +366,7 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
+  maxConcurrent: 3,
 };
 
 function splitKeywordPhrase(phrase: string): string[] {

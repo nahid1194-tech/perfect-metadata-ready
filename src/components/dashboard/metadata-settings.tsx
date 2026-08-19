@@ -85,6 +85,14 @@ export function MetadataSettings() {
           max={60}
           onChange={(value) => setSettings({ keywordCount: value })}
         />
+        <SliderRow
+          label="Concurrent Generations"
+          value={settings.maxConcurrent}
+          unit="images"
+          min={1}
+          max={8}
+          onChange={(value) => setSettings({ maxConcurrent: value })}
+        />
 
         <div className="h-px bg-border" />
 

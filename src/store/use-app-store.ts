@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
   enableSuffix: false,
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
+  maxConcurrent: 3,
 };
 
 export const DEFAULT_GIT_CONFIG: GitSyncConfig = {

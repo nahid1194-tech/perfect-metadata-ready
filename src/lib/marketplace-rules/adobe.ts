@@ -153,6 +153,29 @@ const KEYWORD_FILLER_TERMS = [
   "concept",
   "design",
   "creative",
+  "abstract",
+  "modern",
+  "minimal",
+  "minimalist",
+  "simple",
+  "clean",
+  "bright",
+  "vibrant",
+  "colorful",
+  "background",
+  "texture",
+  "pattern",
+  "space",
+  "copy",
+  "realistic",
+  "isolated",
+  "view",
+  "sample",
+  "example",
+  "template",
+  "stock",
+  "clipart",
+  "clip art",
 ];
 
 export const ADOBE_RULES: MarketplaceRules = {
@@ -168,7 +191,7 @@ export const ADOBE_RULES: MarketplaceRules = {
   descriptionGuidance:
     "Adobe Stock does not use a description field; always return an empty string for adobe.description.",
   keywordGuidance:
-    "Provide the requested number of keywords. Every keyword must be ONE word or a natural TWO-word phrase, never more. Order strictly by search importance: the strongest, most specific, high-intent terms first (primary subject, action, important objects, style, medium, colors, composition, setting, commercial concepts). Every keyword must be visually supported and correctly spelled. No duplicates, near-duplicates, truncated words, generic filler, trademarked brands, camera information, or filename tokens.",
+    "Provide the requested number of keywords. STRONGLY prefer single-word keywords — only use a two-word phrase when the single word alone would lose critical meaning. Order strictly by search importance: the strongest, most specific, high-intent terms first (primary subject, action, important objects, style, medium, colors, composition, setting, commercial concepts). Every keyword must be visually supported and correctly spelled. No duplicates or near-duplicates (case-insensitive); if both 'business' and 'business strategy' appear, keep only the stronger one. No truncated words, generic filler, trademarked brands, camera information, or filename tokens. No keyword stuffing — do not pad with weak or loosely related terms.",
   categoryGuidance:
     "Choose exactly ONE numeric Adobe Stock category ID that best matches the actual asset type and subject, and output only the number. Official categories (ID Label): {ADOBE_CATEGORIES}",
   trademarkTerms: TRADEMARK_TERMS,

@@ -234,11 +234,14 @@ TITLE (both marketplaces):
 
 KEYWORDS (both marketplaces):
 - Each keyword must be ONE word or a natural TWO-word phrase. NEVER more than two words.
-- Put the strongest, most searchable high-intent terms first.
+- STRONGLY prefer single-word keywords over two-word phrases. Only use a two-word phrase when the single word alone would lose critical meaning (e.g., "latte art" is better than "latte" + "art").
+- Put the strongest, most searchable high-intent terms first: primary subject → action → important objects → style → medium → colors → composition → setting → commercial concepts.
 - ${platform === "adobe" ? `For ${rules.label}: exactly ${keywordTarget} keywords.` : `For ${rules.label}: exactly ${keywordTarget} keywords (within the ${rules.keywordMin}-${rules.keywordMax} range).`}
 - For the OTHER marketplace (${otherMarketplace}), also provide the count specified in the marketplace section above.
 - Every keyword must be visually supported by the image analysis.
-- No duplicates or near-duplicates; no truncated words; no filename fragments or UUIDs; no SEO filler.
+- NO duplicates or near-duplicates (case-insensitive). For example, "business" and "business strategy" are near-duplicates — keep only the stronger one.
+- NO truncated words, filename fragments, UUIDs, SEO filler, or weak generic terms.
+- NO keyword stuffing: do not pad the list with weak or loosely related terms just to hit the count. Quality over quantity.
 - Never use brands, trademarks, camera info, or unrelated trending terms.
 
 ${platform === "shutterstock" ? "DESCRIPTION:\n- 1-2 factual sentences describing the subject, setting, and action (no marketing language).\n\n" : ""}CATEGORY:

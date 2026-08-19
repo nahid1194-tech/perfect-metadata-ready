@@ -62,6 +62,30 @@ function findNearDuplicate(pairs: string[][]): string | null {
         .replace(/([^ ])s$/g, "$1")
         .trim();
     if (roots(a) === roots(b)) return `"${a}" and "${b}"`;
+
+    const aLower = a.toLowerCase().trim();
+    const bLower = b.toLowerCase().trim();
+    const aWords = aLower.split(/\s+/);
+    const bWords = bLower.split(/\s+/);
+    if (
+      aWords.length >= 1 &&
+      bWords.length >= 1 &&
+      (aLower.startsWith(bLower + " ") ||
+        bLower.startsWith(aLower + " ") ||
+        aLower.endsWith(" " + bLower) ||
+        bLower.endsWith(" " + aLower))
+    ) {
+      return `"${a}" and "${b}"`;
+    }
+    const shorter = aWords.length <= bWords.length ? aWords : bWords;
+    const longer = aWords.length <= bWords.length ? bWords : aWords;
+    if (shorter.length < longer.length) {
+      const shorterSet = new Set(shorter);
+      const overlap = longer.filter((w) => shorterSet.has(w));
+      if (overlap.length >= shorter.length * 0.5 && overlap.length > 0) {
+        return `"${a}" and "${b}"`;
+      }
+    }
   }
   return null;
 }
@@ -237,6 +261,20 @@ function validateKeywords(
           `Keyword "${keyword}" has more than ${rules.keywordMaxWords} words`
         )
       );
+    }
+    if (words.length === 2 && format === "adobe") {
+      const shorterCandidate = words[0];
+      const isRedundant = seen.has(shorterCandidate.toLowerCase());
+      if (!isRedundant) {
+        warnings.push(
+          issue(
+            format,
+            "keywords",
+            "warning",
+            `Keyword "${keyword}" is two words; prefer the single-word form "${shorterCandidate}" if it captures the same meaning`
+          )
+        );
+      }
     }
     if (NUMERIC_ONLY_PATTERN.test(keyword)) {
       errors.push(

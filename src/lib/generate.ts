@@ -475,6 +475,7 @@ function buildKeywordPool(meta: StockMetadata): string[] {
 
 function enforceKeywords(values: string[], pool: string[], target: number): string[] {
   const seen = new Set<string>();
+  const seenWords = new Set<string>();
   const out: string[] = [];
   const push = (item: string) => {
     const clean = stripFilenameTokens(
@@ -482,19 +483,39 @@ function enforceKeywords(values: string[], pool: string[], target: number): stri
     );
     const key = clean.toLowerCase();
     if (!clean || key.length < 3 || seen.has(key)) return;
+    const words = key.split(/\s+/);
+    if (words.length > 1) {
+      const uniqueWords = words.filter((w) => !seenWords.has(w));
+      if (uniqueWords.length === 0) return;
+    }
     seen.add(key);
+    for (const word of words) seenWords.add(word);
     out.push(clean);
   };
   for (const value of values) {
-    for (const candidate of splitKeywordPhrase(value)) {
-      push(candidate);
+    const candidates = splitKeywordPhrase(value);
+    const singleWord = candidates.find((c) => c.split(/\s+/).length === 1);
+    const multiWord = candidates.find((c) => c.split(/\s+/).length > 1);
+    if (singleWord) {
+      push(singleWord);
+      if (out.length >= target) break;
+    }
+    if (multiWord) {
+      push(multiWord);
       if (out.length >= target) break;
     }
     if (out.length >= target) break;
   }
   for (const value of pool) {
-    for (const candidate of splitKeywordPhrase(value)) {
-      push(candidate);
+    const candidates = splitKeywordPhrase(value);
+    const singleWord = candidates.find((c) => c.split(/\s+/).length === 1);
+    const multiWord = candidates.find((c) => c.split(/\s+/).length > 1);
+    if (singleWord) {
+      push(singleWord);
+      if (out.length >= target) break;
+    }
+    if (multiWord) {
+      push(multiWord);
       if (out.length >= target) break;
     }
     if (out.length >= target) break;
@@ -621,17 +642,31 @@ function sanitizeKeywords(
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
+  const seenWords = new Set<string>();
   const push = (keyword: string) => {
     const clean = stripFilenameTokens(keyword.replace(/,/g, "").trim());
     const key = clean.toLowerCase();
-    if (!clean || seen.has(key)) return;
+    if (!clean || key.length < 3 || seen.has(key)) return;
+    const words = key.split(/\s+/);
+    if (words.length > 1) {
+      const uniqueWords = words.filter((w) => !seenWords.has(w));
+      if (uniqueWords.length === 0) return;
+    }
     seen.add(key);
+    for (const word of words) seenWords.add(word);
     out.push(clean);
   };
   const source = Array.isArray(value) ? value.map(String) : [];
   for (const keyword of source) {
-    for (const candidate of splitKeywordPhrase(keyword)) {
-      push(candidate);
+    const candidates = splitKeywordPhrase(keyword);
+    const singleWord = candidates.find((c) => c.split(/\s+/).length === 1);
+    const multiWord = candidates.find((c) => c.split(/\s+/).length > 1);
+    if (singleWord) {
+      push(singleWord);
+      if (out.length >= max) break;
+    }
+    if (multiWord) {
+      push(multiWord);
       if (out.length >= max) break;
     }
     if (out.length >= max) break;

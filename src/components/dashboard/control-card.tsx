@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ChevronDown, KeyRound, Sparkles, Zap, Clock, AlertTriangle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -37,12 +37,21 @@ function ErrorLog() {
       const item = queueItems[id];
       const image = images.find((img) => img.id === id);
       return item && item.error
-        ? { id, name: image?.name ?? id, error: item.error }
+        ? { id, name: image?.name ?? id, error: item.error, kind: "failed" as const }
         : null;
     })
-    .filter(Boolean) as { id: string; name: string; error: string }[];
+    .filter(Boolean) as { id: string; name: string; error: string; kind: "failed" }[];
 
-  if (failedItems.length === 0) {
+  const cancelledItems = Object.values(queueItems)
+    .filter((item) => item.status === "cancelled")
+    .map((item) => {
+      const image = images.find((img) => img.id === item.imageId);
+      return { id: item.imageId, name: image?.name ?? item.imageId, kind: "cancelled" as const };
+    });
+
+  const allItems = [...failedItems, ...cancelledItems];
+
+  if (allItems.length === 0) {
     return <p className="text-xs text-muted-foreground">No errors.</p>;
   }
 
@@ -52,6 +61,12 @@ function ErrorLog() {
         <div key={item.id} className="rounded-lg bg-destructive/5 p-2">
           <p className="truncate text-xs font-medium text-foreground">{item.name}</p>
           <p className="break-words text-xs text-destructive">{item.error}</p>
+        </div>
+      ))}
+      {cancelledItems.map((item) => (
+        <div key={item.id} className="rounded-lg bg-slate-500/5 p-2">
+          <p className="truncate text-xs font-medium text-foreground">{item.name}</p>
+          <p className="break-words text-xs text-slate-500 dark:text-slate-400">Generation stopped</p>
         </div>
       ))}
     </div>
@@ -70,6 +85,14 @@ export function ControlCard() {
   const [keysOpen, setKeysOpen] = useState(false);
   const [perfOpen, setPerfOpen] = useState(false);
   const [errorsOpen, setErrorsOpen] = useState(false);
+  const failedIds = useAppStore((state) => state.failedImageIds);
+  const errorCount =
+    failedIds.length +
+    Object.values(queueItems).filter((item) => item.status === "cancelled")
+      .length;
+  useEffect(() => {
+    if (errorCount > 0) setErrorsOpen(true);
+  }, [errorCount]);
   const results = useAppStore((state) => state.results);
   const geminiKeyCount = apiKeys.filter(
     (entry) =>
@@ -240,6 +263,11 @@ export function ControlCard() {
         <span className="flex items-center gap-2">
           <AlertTriangle />
           Error Log
+          {errorCount > 0 ? (
+            <Badge variant="secondary" className="ml-1 h-5 min-w-5 px-1 text-[10px]">
+              {errorCount}
+            </Badge>
+          ) : null}
         </span>
         <ChevronDown
           className={cn("size-4 transition-transform", errorsOpen && "rotate-180")}

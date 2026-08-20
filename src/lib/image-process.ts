@@ -69,9 +69,14 @@ export async function prepareImageForApi(
     image.apiMimeType &&
     maxDimension === ANALYSIS_MAX_DIMENSION
   ) {
-    const entry = { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
-    preparedCache.set(cacheKey, entry);
-    return entry;
+    const base64Check = image.apiDataUrl.includes(",")
+      ? (image.apiDataUrl.split(",")[1] ?? "")
+      : image.apiDataUrl;
+    if (base64Check.length > 0) {
+      const entry = { dataUrl: image.apiDataUrl, mimeType: image.apiMimeType };
+      preparedCache.set(cacheKey, entry);
+      return entry;
+    }
   }
 
   // Deferred base64: a compressed Blob was stored during upload. Convert it
@@ -123,16 +128,27 @@ export async function prepareImageForApi(
       });
     }
     return compressed;
-  } catch (error) {
+  } catch (compressionError) {
     console.warn(
-      "[Image] Could not compress for the API, sending the original image",
-      error
+      "[Image] Could not compress for the API, attempting final fallback",
+      compressionError
     );
+  }
+
+  const fallbackDataUrl = image.apiDataUrl ?? image.dataUrl ?? "";
+  const fallbackBase64 = fallbackDataUrl.includes(",")
+    ? (fallbackDataUrl.split(",")[1] ?? "")
+    : fallbackDataUrl;
+  if (fallbackBase64.length > 0) {
     return {
-      dataUrl: image.apiDataUrl ?? image.dataUrl ?? "",
+      dataUrl: fallbackDataUrl,
       mimeType: image.apiMimeType ?? image.type,
     };
   }
+  throw new Error(
+    `Unsupported or corrupted image — "${image.name}" could not be read. ` +
+      "The file may be empty, corrupted, or in a format that cannot be processed."
+  );
 }
 
 export function clearPreparedCache(): void {

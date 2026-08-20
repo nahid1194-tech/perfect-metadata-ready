@@ -1332,6 +1332,15 @@ export async function generateWithOpenAI(
         imageUrl = dataUrl.startsWith("data:")
           ? dataUrl
           : `data:${mimeType};base64,${dataUrl}`;
+        const imgBase64 = imageUrl.includes(",")
+          ? (imageUrl.split(",")[1] ?? "")
+          : "";
+        if (!imgBase64 || imgBase64.length === 0) {
+          throw new GeminiApiError(
+            "Image data is empty after preparation. The source image may be corrupted or unsupported.",
+            400
+          );
+        }
       }
       return callOpenAI(prompt, imageUrl, apiKey, model, 0.3, signal);
     },
@@ -1439,6 +1448,15 @@ export async function generateWithMistral(
         imageUrl = dataUrl.startsWith("data:")
           ? dataUrl
           : `data:${mimeType};base64,${dataUrl}`;
+        const imgBase64 = imageUrl.includes(",")
+          ? (imageUrl.split(",")[1] ?? "")
+          : "";
+        if (!imgBase64 || imgBase64.length === 0) {
+          throw new GeminiApiError(
+            "Image data is empty after preparation. The source image may be corrupted or unsupported.",
+            400
+          );
+        }
       }
       return callMistral(prompt, imageUrl, apiKey, model, 0.3, signal);
     },

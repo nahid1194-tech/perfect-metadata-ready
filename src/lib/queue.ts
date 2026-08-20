@@ -765,6 +765,8 @@ export async function runQueue(
   if (!opts.retryFailed) {
     store.setFailedImageIds([]);
   }
+  store.closeSuccess();
+  store.closeError();
 
   const activeKeyCount = activeKeys(store.apiKeys).length;
   const hasApiKeys = activeKeyCount > 0;
@@ -999,6 +1001,8 @@ export async function retryImage(imageId: string): Promise<void> {
   store.setQueueState("running");
   store.setBatchTotal(0);
   store.setBatchCompleted(0);
+  store.closeSuccess();
+  store.closeError();
 
   try {
     store.setActiveImageId(imageId);

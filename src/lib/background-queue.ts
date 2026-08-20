@@ -331,6 +331,8 @@ export function startBackgroundJob(opts: { ids?: string[]; retryFailed?: boolean
     });
     return;
   }
+  store.closeSuccess();
+  store.closeError();
   ensureWorker();
   sendInit();
   post({ type: "start", payload: opts });

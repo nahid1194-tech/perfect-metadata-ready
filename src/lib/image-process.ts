@@ -81,16 +81,25 @@ export async function prepareImageForApi(
     image.apiMimeType &&
     maxDimension === ANALYSIS_MAX_DIMENSION
   ) {
-    const dataUrl = await blobToDataUrl(image.apiBlob);
-    const entry = { dataUrl, mimeType: image.apiMimeType };
-    preparedCache.set(cacheKey, entry);
-    if (maxDimension === ANALYSIS_MAX_DIMENSION) {
-      useAppStore.getState().updateImage(image.id, {
-        apiDataUrl: dataUrl,
-        apiMimeType: image.apiMimeType,
-      });
+    try {
+      const dataUrl = await blobToDataUrl(image.apiBlob);
+      const base64 = dataUrl.split(",")[1] ?? "";
+      if (base64.length > 0) {
+        const entry = { dataUrl, mimeType: image.apiMimeType };
+        preparedCache.set(cacheKey, entry);
+        useAppStore.getState().updateImage(image.id, {
+          apiDataUrl: dataUrl,
+          apiMimeType: image.apiMimeType,
+        });
+        return entry;
+      }
+      console.warn(
+        "[Image] apiBlob produced empty data URL, re-compressing from source blob",
+        image.name
+      );
+    } catch (error) {
+      console.warn("[Image] blobToDataUrl failed, re-compressing from source blob", error);
     }
-    return entry;
   }
 
   try {

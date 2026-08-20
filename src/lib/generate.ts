@@ -1193,6 +1193,12 @@ async function analysisImageParts(
 ): Promise<unknown[]> {
   const { dataUrl, mimeType } = await getPreparedAnalysis(image, dimension);
   const base64 = dataUrl.split(",")[1] ?? dataUrl;
+  if (!base64 || base64.length === 0) {
+    throw new GeminiApiError(
+      "Image data is empty after preparation. The source image may be corrupted or unsupported.",
+      400
+    );
+  }
   return [{ inline_data: { mime_type: mimeType, data: base64 } }];
 }
 

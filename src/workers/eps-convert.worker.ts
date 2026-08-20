@@ -1,5 +1,14 @@
-import type createModule from "@jspawn/ghostscript-wasm/gs.js";
-import type { GhostscriptModule } from "@jspawn/ghostscript-wasm/gs.js";
+declare function importScripts(...urls: string[]): void;
+declare const Module: (opts?: Record<string, unknown>) => Promise<{
+  FS: {
+    writeFile(path: string, data: Uint8Array): void;
+    readFile(path: string, opts: { encoding: "binary" }): Uint8Array;
+    unlink(path: string): void;
+  };
+  callMain(args: string[]): number;
+}>;
+
+importScripts("/ghostscript/gs.js");
 
 const GHOSTSCRIPT_WASM_URL = "/ghostscript/gs.wasm";
 const EPS_DPI = 150;
@@ -11,35 +20,14 @@ type ConvertRequest = {
 };
 
 type ConvertResponse =
-  | { id: number; ok: true; pngBytes: ArrayBuffer | SharedArrayBuffer; mimeType: string }
+  | { id: number; ok: true; pngBytes: ArrayBuffer; mimeType: string }
   | { id: number; ok: false; error: string };
 
-let gsFactoryPromise: Promise<typeof createModule> | null = null;
-let activeGs: GhostscriptModule | null = null;
+let activeGs: Awaited<ReturnType<typeof Module>> | null = null;
 
-async function loadGhostscriptFactory(): Promise<typeof createModule> {
-  if (!gsFactoryPromise) {
-    gsFactoryPromise = (async () => {
-      const mod = (await import("@jspawn/ghostscript-wasm/gs.js")) as {
-        default?: typeof createModule;
-        Module?: typeof createModule;
-      };
-      const factory = mod.default ?? mod.Module;
-      if (!factory) {
-        throw new Error(
-          "The Ghostscript renderer could not be loaded in the worker."
-        );
-      }
-      return factory;
-    })();
-  }
-  return gsFactoryPromise;
-}
-
-async function ensureGhostscript(): Promise<GhostscriptModule> {
+async function ensureGhostscript() {
   if (activeGs) return activeGs;
-  const factory = await loadGhostscriptFactory();
-  activeGs = await factory({ locateFile: () => GHOSTSCRIPT_WASM_URL });
+  activeGs = await Module({ locateFile: () => GHOSTSCRIPT_WASM_URL });
   return activeGs;
 }
 
@@ -65,13 +53,10 @@ function extractErrorDetail(stdout: string[], stderr: string[]): string {
   return parts.join(" — ").slice(0, 400);
 }
 
-async function convertEps(
-  fileBytes: ArrayBuffer,
-  _fileName: string
-): Promise<{ pngBytes: ArrayBuffer; mimeType: string }> {
+async function convertEps(fileBytes: ArrayBuffer, fileName: string) {
   const gs = await ensureGhostscript();
 
-  const ext = _fileName.endsWith(".ps") ? "ps" : "eps";
+  const ext = fileName.endsWith(".ps") ? "ps" : "eps";
   const input = `input.${ext}`;
   const output = "output.png";
 
@@ -130,16 +115,8 @@ async function convertEps(
   try {
     pngBytes = gs.FS.readFile(output, { encoding: "binary" });
   } finally {
-    try {
-      gs.FS.unlink(input);
-    } catch {
-      // Ignore cleanup errors.
-    }
-    try {
-      gs.FS.unlink(output);
-    } catch {
-      // Ignore cleanup errors.
-    }
+    try { gs.FS.unlink(input); } catch { /* cleanup */ }
+    try { gs.FS.unlink(output); } catch { /* cleanup */ }
   }
 
   if (!pngBytes.length) {
@@ -148,11 +125,7 @@ async function convertEps(
 
   const copied = new ArrayBuffer(pngBytes.byteLength);
   new Uint8Array(copied).set(pngBytes);
-
-  return {
-    pngBytes: copied,
-    mimeType: "image/png",
-  };
+  return { pngBytes: copied, mimeType: "image/png" };
 }
 
 self.addEventListener("message", async (event: MessageEvent<ConvertRequest>) => {
@@ -170,8 +143,7 @@ self.addEventListener("message", async (event: MessageEvent<ConvertRequest>) => 
     const response: ConvertResponse = {
       id,
       ok: false,
-      error:
-        error instanceof Error ? error.message : "EPS conversion failed.",
+      error: error instanceof Error ? error.message : "EPS conversion failed.",
     };
     self.postMessage(response);
   }

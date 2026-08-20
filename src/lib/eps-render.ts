@@ -5,6 +5,26 @@ const GHOSTSCRIPT_WASM_URL = "/ghostscript/gs.wasm";
 
 const VECTOR_EXTENSION = /\.(eps|ps)$/i;
 
+let epsJobs = 0;
+const epsQueue: Array<() => void> = [];
+
+async function acquireEpsSlot(): Promise<void> {
+  if (epsJobs < 1) {
+    epsJobs++;
+    return;
+  }
+  await new Promise<void>((resolve) => epsQueue.push(resolve));
+  epsJobs++;
+}
+
+function releaseEpsSlot(): void {
+  epsJobs--;
+  if (epsQueue.length > 0) {
+    const next = epsQueue.shift()!;
+    next();
+  }
+}
+
 export function isVectorFile(file: { name: string }): boolean {
   return VECTOR_EXTENSION.test(file.name);
 }
@@ -93,6 +113,17 @@ async function loadGhostscriptFactory(): Promise<GhostscriptFactory> {
 }
 
 export async function renderVectorToPng(
+  file: File
+): Promise<{ blob: Blob; mimeType: string }> {
+  await acquireEpsSlot();
+  try {
+    return await renderVectorToPngInner(file);
+  } finally {
+    releaseEpsSlot();
+  }
+}
+
+async function renderVectorToPngInner(
   file: File
 ): Promise<{ blob: Blob; mimeType: string }> {
   const name = file.name;

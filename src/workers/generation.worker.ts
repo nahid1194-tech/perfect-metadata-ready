@@ -64,15 +64,22 @@ function handleInit(payload: InitPayload): void {
   }
 }
 
+const shippedApiData = new Map<string, string>();
+
 function buildSnapshot(): WorkerSnapshot {
   const state = useAppStore.getState();
   const apiPrepared: WorkerSnapshot["apiPrepared"] = {};
   for (const image of state.images) {
-    if (image.apiDataUrl || image.apiMimeType) {
+    if (!image.apiMimeType) continue;
+    const prev = shippedApiData.get(image.id);
+    if (image.apiDataUrl && image.apiDataUrl !== prev) {
+      shippedApiData.set(image.id, image.apiDataUrl);
       apiPrepared[image.id] = {
         apiDataUrl: image.apiDataUrl,
         apiMimeType: image.apiMimeType,
       };
+    } else {
+      apiPrepared[image.id] = { apiMimeType: image.apiMimeType };
     }
   }
   return {

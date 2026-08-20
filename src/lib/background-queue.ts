@@ -127,15 +127,19 @@ function applySnapshot(snap: WorkerSnapshot): void {
     for (const [id, patch] of Object.entries(snap.apiPrepared)) {
       if (!imageIds.has(id)) continue;
       const current = store.images.find((image) => image.id === id);
+      if (!current) continue;
+      const updates: Partial<ImageAsset> = {};
       if (
-        current &&
-        (current.apiDataUrl !== patch.apiDataUrl ||
-          current.apiMimeType !== patch.apiMimeType)
+        patch.apiDataUrl !== undefined &&
+        current.apiDataUrl !== patch.apiDataUrl
       ) {
-        store.updateImage(id, {
-          apiDataUrl: patch.apiDataUrl,
-          apiMimeType: patch.apiMimeType,
-        });
+        updates.apiDataUrl = patch.apiDataUrl;
+      }
+      if (current.apiMimeType !== patch.apiMimeType) {
+        updates.apiMimeType = patch.apiMimeType;
+      }
+      if (Object.keys(updates).length > 0) {
+        store.updateImage(id, updates);
       }
     }
   }

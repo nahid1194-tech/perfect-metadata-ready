@@ -6,6 +6,7 @@ import {
   ImageTooLargeError,
   prepareCompressedBlob,
 } from "@/lib/image-process";
+import { compressImageBlob } from "@/lib/image-worker-client";
 import {
   isVectorFile,
   renderVectorToPng,
@@ -144,9 +145,15 @@ async function optimizeAsset(
       revokeObjectUrl(asset.previewUrl);
 
       profiler.start("compress");
-      const compressed = await prepareCompressedBlob(rendered.blob, {
+      const workerResult = compressImageBlob(rendered.blob, {
         maxDimension: ANALYSIS_MAX_DIMENSION,
+        maxBytes: IMAGE_MAX_BYTES,
       });
+      const compressed = workerResult
+        ? await workerResult
+        : await prepareCompressedBlob(rendered.blob, {
+            maxDimension: ANALYSIS_MAX_DIMENSION,
+          });
       profiler.end("compress");
 
       onItem?.(file, { phase: "converting", progress: 100 });
@@ -217,9 +224,15 @@ async function optimizeAsset(
       }
 
       profiler.start("compress");
-      const compressed = await prepareCompressedBlob(file, {
+      const workerResult = compressImageBlob(file, {
         maxDimension: ANALYSIS_MAX_DIMENSION,
+        maxBytes: IMAGE_MAX_BYTES,
       });
+      const compressed = workerResult
+        ? await workerResult
+        : await prepareCompressedBlob(file, {
+            maxDimension: ANALYSIS_MAX_DIMENSION,
+          });
       profiler.end("compress");
 
       onItem?.(file, { phase: "preparing", progress: 100 });

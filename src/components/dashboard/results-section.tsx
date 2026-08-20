@@ -1,13 +1,15 @@
 "use client"
 
 import { useEffect, useMemo, useRef } from "react"
-import { AnimatePresence } from "framer-motion"
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import { Sparkles } from "lucide-react"
 
 import type { GenerationResult } from "@/lib/types"
 import { ImageCard } from "@/components/dashboard/image-card"
 import { PendingImageCard } from "@/components/dashboard/pending-image-card"
 import { useAppStore } from "@/store/use-app-store"
+
+const VIRTUALIZE_THRESHOLD = 20;
 
 export function ResultsSection() {
   const images = useAppStore((state) => state.images);
@@ -16,6 +18,7 @@ export function ResultsSection() {
   const activeImageId = useAppStore((state) => state.activeImageId);
   const autoScroll = useAppStore((state) => state.autoScroll);
   const prevActiveRef = useRef<string | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   useEffect(() => {
     if (activeImageId && activeImageId !== prevActiveRef.current) {
@@ -65,6 +68,23 @@ export function ResultsSection() {
 
   const pendingCount = cards.filter((card) => card.kind === "pending").length;
 
+  useEffect(() => {
+    if (
+      !activeImageId ||
+      !autoScroll ||
+      cards.length <= VIRTUALIZE_THRESHOLD
+    )
+      return;
+    const index = cards.findIndex((card) => {
+      const cardImageId =
+        card.kind === "result" ? card.result.imageId : card.image.id;
+      return cardImageId === activeImageId;
+    });
+    if (index >= 0) {
+      virtuosoRef.current?.scrollToIndex({ index, align: "center" });
+    }
+  }, [activeImageId, autoScroll, cards]);
+
   if (cards.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed bg-card/60 px-6 py-12 text-center">
@@ -73,12 +93,27 @@ export function ResultsSection() {
         </div>
         <p className="text-sm font-semibold">No results yet</p>
         <p className="max-w-sm text-sm text-muted-foreground">
-          Upload images and hit “Generate All” — metadata for each image will
+          Upload images and hit &ldquo;Generate All&rdquo; &mdash; metadata for each image will
           appear here, ready to edit and export.
         </p>
       </div>
     );
   }
+
+  const renderItem = (card: NonNullable<(typeof cards)[number]>) =>
+    card.kind === "result" ? (
+      <div className="pb-3">
+        <ImageCard result={card.result} />
+      </div>
+    ) : (
+      <div className="pb-3">
+        <PendingImageCard
+          image={card.image}
+          item={card.item}
+          active={card.image.id === activeImageId}
+        />
+      </div>
+    );
 
   return (
     <section className="flex flex-col gap-3">
@@ -88,20 +123,24 @@ export function ResultsSection() {
           <span className="text-muted-foreground">({cards.length})</span>
         </h2>
       </div>
-      <AnimatePresence initial={false}>
-        {cards.map((card) =>
-          card.kind === "result" ? (
-            <ImageCard key={card.result.id} result={card.result} />
-          ) : (
-            <PendingImageCard
-              key={card.image.id}
-              image={card.image}
-              item={card.item}
-              active={card.image.id === activeImageId}
-            />
-          )
-        )}
-      </AnimatePresence>
+      {cards.length <= VIRTUALIZE_THRESHOLD ? (
+        <div className="flex flex-col">
+          {cards.map((card) => (
+            <div
+              key={card.kind === "result" ? card.result.id : card.image.id}
+            >
+              {renderItem(card)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Virtuoso
+          ref={virtuosoRef}
+          useWindowScroll
+          data={cards}
+          itemContent={(_, card) => renderItem(card)}
+        />
+      )}
     </section>
   );
 }

@@ -36,7 +36,9 @@ export function ImageUpload() {
   const [dragging, setDragging] = useState(false);
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [galleryHidden, setGalleryHidden] = useState(false);
+  const [showAllGallery, setShowAllGallery] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const GALLERY_VISIBLE_LIMIT = 40;
 
   useEffect(() => {
     if (generating) setGalleryHidden(true);
@@ -249,7 +251,10 @@ export function ImageUpload() {
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             <AnimatePresence initial={false}>
-              {images.map((image) => {
+              {(showAllGallery
+                ? images
+                : images.slice(0, GALLERY_VISIBLE_LIMIT)
+              ).map((image) => {
                 const selected = selectedIds.includes(image.id);
                 const previewSrc = image.previewUrl ?? image.apiDataUrl ?? image.dataUrl;
                 return (
@@ -324,6 +329,15 @@ export function ImageUpload() {
               })}
             </AnimatePresence>
           </div>
+          {!showAllGallery && images.length > GALLERY_VISIBLE_LIMIT ? (
+            <button
+              type="button"
+              onClick={() => setShowAllGallery(true)}
+              className="text-center text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              Show all {images.length} images (scrolling {images.length - GALLERY_VISIBLE_LIMIT} more)
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

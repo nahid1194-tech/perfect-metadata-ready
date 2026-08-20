@@ -38,7 +38,9 @@ function qualityColor(score: number): string {
 
 export const ImageCard = memo(function ImageCard({ result }: { result: GenerationResult }) {
   const platform = useAppStore((state) => state.settings.platform);
-  const images = useAppStore((state) => state.images);
+  const image = useAppStore((state) =>
+    state.images.find((img) => img.id === result.imageId)
+  );
   const updateResult = useAppStore((state) => state.updateResult);
   const removeResult = useAppStore((state) => state.removeResult);
   const { regenerate } = useGenerate();
@@ -51,7 +53,6 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const isAdobe = format === "adobe";
   const keywordMax = isAdobe ? ADOBE_KEYWORDS_MAX : SHUTTERSTOCK_KEYWORDS_MAX;
 
-  const image = images.find((item) => item.id === result.imageId);
   const previewable =
     image && (image.type.startsWith("image/") || image.type.startsWith("video/"));
   const previewSrc = image?.previewUrl ?? image?.apiDataUrl ?? image?.dataUrl;

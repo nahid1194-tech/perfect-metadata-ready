@@ -22,7 +22,7 @@ const MAX_IMAGES = 100;
 
 type UploadItem = {
   file: File;
-  phase: "preparing" | "converting";
+  phase: "preparing" | "converting" | "uploading";
   progress: number;
 };
 
@@ -196,10 +196,20 @@ export function ImageUpload() {
             <div key={index} className="flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="min-w-0 truncate font-medium">{item.file.name}</span>
-                {item.phase === "preparing" || item.phase === "converting" ? (
+                {item.phase === "uploading" ? (
                   <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
                     <Loader2 className="size-3 animate-spin" />
-                    {item.phase === "converting" ? "Converting…" : "Preparing…"}
+                    Uploading…
+                  </span>
+                ) : item.phase === "converting" ? (
+                  <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    Converting…
+                  </span>
+                ) : item.phase === "preparing" ? (
+                  <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    Preparing…
                   </span>
                 ) : (
                   <span className="shrink-0 text-muted-foreground tabular-nums">
@@ -208,10 +218,10 @@ export function ImageUpload() {
                 )}
               </div>
               <Progress
-                value={item.phase === "preparing" || item.phase === "converting" ? 100 : item.progress}
+                value={item.phase === "preparing" || item.phase === "converting" || item.phase === "uploading" ? 100 : item.progress}
                 className="h-1"
                 indicatorClassName={
-                  item.phase === "preparing" || item.phase === "converting"
+                  item.phase === "preparing" || item.phase === "converting" || item.phase === "uploading"
                     ? "animate-pulse bg-primary/70"
                     : undefined
                 }

@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
+  serverExternalPackages: ["@jspawn/ghostscript-wasm"],
   webpack: (config) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,

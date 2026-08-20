@@ -1,3 +1,10 @@
+export type EpsConversionStatus =
+  | "queued"
+  | "uploading"
+  | "converting"
+  | "ready"
+  | "failed";
+
 export type ImageAsset = {
   id: string;
   name: string;
@@ -21,6 +28,8 @@ export type ImageAsset = {
   height?: number;
   /** True once the AI analysis image has been prepared at upload time. */
   prepared?: boolean;
+  /** EPS/PS conversion status — only set for vector files. */
+  epsStatus?: EpsConversionStatus;
 };
 
 export type MetadataMode = "adobe" | "shutterstock";

@@ -131,8 +131,6 @@ async function resolveKeyModels(
   fallbackModels: string[],
   now: number
 ): Promise<string[]> {
-  if (entry.provider !== "gemini") return fallbackModels;
-
   const discovered =
     entry.models && entry.models.length > 0 ? entry.models : null;
   if (discovered) {
@@ -312,8 +310,15 @@ async function generateWithKeys(
       continue;
     }
 
-    const models = await resolveKeyModels(key, fallbackModels, Date.now());
+    const models = await resolveKeyModels(key, fallbackModels, now);
     if (models.length === 0) {
+      const states = key.modelStates ?? {};
+      for (const state of Object.values(states)) {
+        if (state && typeof state === "object" && "until" in state) {
+          const u = (state as { until: number }).until;
+          if (u > now) waitUntil = Math.min(waitUntil, u);
+        }
+      }
       console.warn(
         `[${provider}] No usable models for key ${keyIndex + 1}/${keys.length} (${maskKey(key.key)}), moving to the next key`
       );
@@ -381,97 +386,58 @@ async function generateWithKeys(
             continue modelLoop;
           }
 
-          // Gemini per-key model fallback: mark the failing model as
-          // temporarily unavailable for this key, then retry the next model
-          // on the same key before moving to the next key. Only key-level
-          // failures skip to the next key.
-          if (provider === "gemini") {
-            if (isRateLimited(error)) {
-              const until = Date.now() + cooldownMsForError(error);
-              sawRateLimit = true;
-              waitUntil = Math.min(waitUntil, until);
-              markModelUnavailable(
-                key.id,
-                model,
-                until,
-                isQuotaExceeded(error) ? "quota-exhausted" : "rate-limited"
-              );
-              console.warn(
-                `[Gemini] Model ${model} rate-limited/quota exhausted (${maskKey(key.key)}), marking unavailable and retrying with the next model`
-              );
-              continue modelLoop;
-            }
-            if (isModelUnavailable(error)) {
-              sawModelUnavailable = true;
-              nonRateLimitError ??= error;
-              markModelUnavailable(
-                key.id,
-                model,
-                Date.now() + cooldownMsForError(error),
-                "model-unavailable"
-              );
-              console.warn(
-                `[Gemini] Model ${model} unavailable (${maskKey(key.key)}), marking unavailable and retrying with the next model`
-              );
-              continue modelLoop;
-            }
-            if (isKeyFailure(error)) {
-              nonRateLimitError ??= error;
-              applyGenerationFailure(key.id, error);
-              console.warn(
-                `[Gemini] API key ${maskKey(key.key)} failed, moving to the next key`
-              );
-              if (keyIndex < orderedKeys.length - 1) {
-                notifyApiKeySwitch(provider, keyIndex + 1);
-              }
-              continue keyLoop;
-            }
-            nonRateLimitError ??= error;
+          if (isRateLimited(error)) {
+            const until = now + cooldownMsForError(error);
+            sawRateLimit = true;
+            waitUntil = Math.min(waitUntil, until);
             markModelUnavailable(
               key.id,
               model,
-              Date.now() + cooldownMsForError(error),
-              "server-error"
+              until,
+              isQuotaExceeded(error) ? "quota-exhausted" : "rate-limited"
             );
             console.warn(
-              `[Gemini] Model ${model} failed (${maskKey(key.key)}), marking unavailable and retrying with the next model`
+              `[${provider}] Model ${model} rate-limited/quota exhausted (${maskKey(key.key)}), marking unavailable and retrying with the next model`
             );
             continue modelLoop;
-          }
-
-          if (isRateLimited(error)) {
-            const until = Date.now() + rateLimitDelayMs(error);
-            sawRateLimit = true;
-            waitUntil = Math.min(waitUntil, until);
-            markKeyRateLimited(key.id, until);
-            applyGenerationFailure(key.id, error);
-            console.log(
-              `[${provider}] Model ${model} rate-limited (${maskKey(key.key)}), switching to the next active key`
-            );
-            if (keyIndex < orderedKeys.length - 1) {
-              notifyApiKeySwitch(provider, keyIndex + 1);
-            }
-            continue keyLoop;
           }
           if (isModelUnavailable(error)) {
             sawModelUnavailable = true;
             nonRateLimitError ??= error;
-            applyGenerationFailure(key.id, error);
-            console.log(
-              `[${provider}] Model ${model} unavailable/busy, trying the next compatible model`
+            markModelUnavailable(
+              key.id,
+              model,
+              now + cooldownMsForError(error),
+              "model-unavailable"
             );
-            break;
+            console.warn(
+              `[${provider}] Model ${model} unavailable (${maskKey(key.key)}), marking unavailable and retrying with the next model`
+            );
+            continue modelLoop;
           }
           if (isKeyFailure(error)) {
             nonRateLimitError ??= error;
             applyGenerationFailure(key.id, error);
+            markKeyRateLimited(key.id, now + cooldownMsForError(error));
+            console.warn(
+              `[${provider}] API key ${maskKey(key.key)} failed, moving to the next key`
+            );
             if (keyIndex < orderedKeys.length - 1) {
               notifyApiKeySwitch(provider, keyIndex + 1);
             }
             continue keyLoop;
           }
           nonRateLimitError ??= error;
-          throw error;
+          markModelUnavailable(
+            key.id,
+            model,
+            now + cooldownMsForError(error),
+            "server-error"
+          );
+          console.warn(
+            `[${provider}] Model ${model} failed (${maskKey(key.key)}), marking unavailable and retrying with the next model`
+          );
+          continue modelLoop;
         }
       }
     }

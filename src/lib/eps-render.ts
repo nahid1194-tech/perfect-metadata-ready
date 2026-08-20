@@ -1,3 +1,5 @@
+import { convertEpsViaWorker } from "@/lib/eps-worker-client";
+
 const VECTOR_EXTENSION = /\.(eps|ps)$/i;
 
 export function isVectorFile(file: { name: string }): boolean {
@@ -26,46 +28,23 @@ export async function renderVectorToPng(
     return cached;
   }
 
-  const formData = new FormData();
-  formData.append("file", file);
-
-  let response: Response;
   try {
-    response = await fetch("/api/convert-eps", {
-      method: "POST",
-      body: formData,
-    });
+    const result = await convertEpsViaWorker(file);
+    if (!result.blob.size) {
+      throw new VectorConversionError(
+        `Conversion produced an empty output for ${file.name}.`
+      );
+    }
+    conversionCache.set(key, result);
+    return result;
   } catch (error) {
+    if (error instanceof VectorConversionError) throw error;
     throw new VectorConversionError(
-      `Could not upload ${file.name} for conversion. ${
-        error instanceof Error ? error.message : "Network error."
+      `Could not convert ${file.name}. ${
+        error instanceof Error ? error.message : "Unknown error."
       }`
     );
   }
-
-  if (!response.ok) {
-    let detail = "";
-    try {
-      const body = (await response.json()) as { error?: string };
-      detail = body.error ?? "";
-    } catch {
-      // Response was not JSON.
-    }
-    throw new VectorConversionError(
-      detail || `Server returned status ${response.status} during EPS conversion.`
-    );
-  }
-
-  const blob = await response.blob();
-  if (!blob.size) {
-    throw new VectorConversionError(
-      `Server produced an empty output for ${file.name}.`
-    );
-  }
-
-  const result = { blob, mimeType: "image/png" };
-  conversionCache.set(key, result);
-  return result;
 }
 
 export function clearEpsConversionCache(): void {

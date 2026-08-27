@@ -1,8 +1,9 @@
+/* eslint-disable jsx-a11y/alt-text -- lucide-react Image is an SVG icon, not an HTML img */
 "use client"
 
-import { CheckCircle2, Download, FileSpreadsheet, RotateCcw } from "lucide-react"
+import { CheckCircle2, Download, FileSpreadsheet, Image, RotateCcw } from "lucide-react"
 
-import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
+import { exportAdobeCsv, exportMagnificCsv, exportShutterstockCsv, fixMagnificMetadata, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
 import { validateMetadata, validateResults } from "@/lib/validation"
 import { Modal } from "@/components/feedback/modal"
 import { Button } from "@/components/ui/button"
@@ -16,7 +17,7 @@ export function SuccessDialog() {
   const results = useAppStore((state) => state.results);
   const { run } = useGenerate();
 
-  const handleExport = async (format: "adobe" | "shutterstock") => {
+  const handleExport = async (format: "adobe" | "shutterstock" | "magnific") => {
     if (format === "adobe") {
       const errors = validateResults(results, "adobe");
       if (errors.length > 0) {
@@ -31,7 +32,7 @@ export function SuccessDialog() {
         );
         return;
       }
-    } else {
+    } else if (format === "shutterstock") {
       let fixed = 0;
       for (const result of results) {
         if (
@@ -57,18 +58,46 @@ export function SuccessDialog() {
           `${fixed} row${fixed === 1 ? "" : "s"} fixed to match the Shutterstock CSV format before export.`
         );
       }
+    } else {
+      let fixed = 0;
+      for (const result of results) {
+        if (
+          validateMetadata(
+            result.metadata.magnific,
+            "magnific"
+          ).length === 0
+        )
+          continue;
+        const corrected = fixMagnificMetadata(
+          result.metadata.magnific
+        );
+        useAppStore.getState().updateResult(result.id, (current) => ({
+          ...current,
+          metadata: { ...current.metadata, magnific: corrected },
+        }));
+        fixed++;
+      }
+      if (fixed > 0) {
+        toast(
+          "info",
+          "CSV auto-corrected",
+          `${fixed} row${fixed === 1 ? "" : "s"} fixed to match the Magnific CSV format before export.`
+        );
+      }
     }
     try {
       if (format === "adobe") await exportAdobeCsv(results);
-      else await exportShutterstockCsv(results);
+      else if (format === "shutterstock") await exportShutterstockCsv(results);
+      else await exportMagnificCsv(results);
       const shortened = resolveExportFilenames(results, format).filter(
         (entry) => entry.shortened
       );
+      const marketplaceName = format === "adobe" ? "Adobe Stock" : format === "shutterstock" ? "Shutterstock" : "Magnific";
       if (shortened.length > 0) {
         toast(
           "info",
           "CSV downloaded",
-          `${shortened.length} filename${shortened.length === 1 ? "" : "s"} shortened to fit the ${format === "adobe" ? "Adobe Stock" : "Shutterstock"} limit.`
+          `${shortened.length} filename${shortened.length === 1 ? "" : "s"} shortened to fit the ${marketplaceName} limit.`
         );
       } else {
         toast("success", "CSV downloaded", "UTF-8 with BOM");
@@ -101,7 +130,7 @@ export function SuccessDialog() {
             CSV ready · {results.length} result{results.length === 1 ? "" : "s"}
           </p>
         </div>
-        <div className="grid w-full grid-cols-2 gap-2">
+        <div className="grid w-full grid-cols-3 gap-2">
           <Button onClick={() => handleExport("adobe")}>
             <Download />
             Adobe CSV
@@ -109,6 +138,10 @@ export function SuccessDialog() {
           <Button onClick={() => handleExport("shutterstock")}>
             <FileSpreadsheet />
             Shutterstock CSV
+          </Button>
+          <Button onClick={() => handleExport("magnific")}>
+            <Image />
+            Magnific CSV
           </Button>
         </div>
         <Button variant="outline" className="w-full" onClick={handleGenerateAgain}>

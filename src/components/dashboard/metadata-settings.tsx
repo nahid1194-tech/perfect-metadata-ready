@@ -1,6 +1,6 @@
 "use client"
 
-import { Aperture, Camera } from "lucide-react"
+import { Aperture, Camera, Image } from "lucide-react"
 
 import type { Marketplace } from "@/lib/types"
 import { MARKETPLACES, marketplaceFormat } from "@/lib/marketplace"
@@ -13,6 +13,7 @@ import { useAppStore } from "@/store/use-app-store"
 const PLATFORM_ICONS: Record<Marketplace, React.ComponentType<{ className?: string }>> = {
   adobe: Aperture,
   shutterstock: Camera,
+  magnific: Image,
 };
 
 export function MetadataSettings() {
@@ -28,7 +29,7 @@ export function MetadataSettings() {
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Marketplace
         </p>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {MARKETPLACES.map(({ id, label }) => {
             const Icon = PLATFORM_ICONS[id];
             const active = settings.platform === id;

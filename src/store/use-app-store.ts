@@ -390,8 +390,8 @@ export const useAppStore = create<AppState>()(
         }) | undefined;
         const validProviders: ApiProvider[] = ["gemini", "openai", "mistral"];
         const persistedPlatform = persisted?.settings?.platform;
-        const validPlatform: "adobe" | "shutterstock" =
-          persistedPlatform === "shutterstock" ? "shutterstock" : "adobe";
+        const validPlatform: "adobe" | "shutterstock" | "magnific" =
+          persistedPlatform === "shutterstock" ? "shutterstock" : persistedPlatform === "magnific" ? "magnific" : "adobe";
         const merged: AppState = {
           ...currentState,
           ...persisted,

@@ -6,13 +6,16 @@ import type {
   GenerationSettings,
   ImageAnalysis,
   ImageAsset,
+  MagnificMetadata,
+  MetadataMode,
   StockMetadata,
 } from "@/lib/types";
 import { devLog } from "@/lib/dev-log";
 import {
-  ADOBE_CATEGORIES,
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
+  MAGNIFIC_KEYWORDS_MAX,
+  MAGNIFIC_TITLE_MAX,
   SHUTTERSTOCK_KEYWORDS_MAX,
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
@@ -456,22 +459,11 @@ function fitTitle(title: string, maxChars: number): string {
   return fitted.replace(/[,\-;:]\s*$/, "").trim();
 }
 
-function categoryLabelWords(category: string): string[] {
-  const raw = category.trim();
-  if (!raw) return [];
-  if (/^\d+$/.test(raw)) {
-    const label = ADOBE_CATEGORIES.find((entry) => String(entry.id) === raw)?.label;
-    return label ? label.split(/\s+/) : [];
-  }
-  return raw.split(/[,\s]+/);
-}
-
-function buildKeywordPool(meta: StockMetadata): string[] {
+function buildKeywordPool(meta: { keywords: string[]; title: string; description?: string }): string[] {
   return [
     ...meta.keywords,
     ...meta.title.split(/\s+/),
     ...(meta.description ? meta.description.split(/\s+/) : []),
-    ...categoryLabelWords(meta.category),
   ];
 }
 
@@ -580,6 +572,7 @@ function applySettings(
     settings.titleLength,
     SHUTTERSTOCK_TITLE_MAX
   );
+  const magnificTitleMax = Math.min(settings.titleLength, MAGNIFIC_TITLE_MAX);
   const adobeKeywordCount = Math.max(
     1,
     Math.min(settings.keywordCount, ADOBE_KEYWORDS_MAX)
@@ -588,11 +581,18 @@ function applySettings(
     SHUTTERSTOCK_KEYWORDS_MIN,
     Math.min(settings.keywordCount, SHUTTERSTOCK_KEYWORDS_MAX)
   );
+  const magnificKeywordCount = Math.max(
+    1,
+    Math.min(settings.keywordCount, MAGNIFIC_KEYWORDS_MAX)
+  );
 
   const adobeKeywords = metadata.adobe.keywords.filter(
     (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
   );
   const shutterstockKeywords = metadata.shutterstock.keywords.filter(
+    (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
+  );
+  const magnificKeywords = metadata.magnific.keywords.filter(
     (keyword) => !negativeKeywords.includes(keyword.toLowerCase())
   );
 
@@ -627,6 +627,20 @@ function applySettings(
         )
       ),
     },
+    magnific: {
+      ...metadata.magnific,
+      title: fitTitleWithAffixes(
+        cleanTitle(metadata.magnific.title),
+        magnificTitleMax
+      ),
+      keywords: enforceTwoWordLimit(
+        enforceKeywords(
+          magnificKeywords,
+          buildKeywordPool(metadata.magnific),
+          magnificKeywordCount
+        )
+      ),
+    },
   };
 }
 
@@ -634,6 +648,7 @@ export function buildNeutralMetadata(): GeneratedMetadata {
   return {
     adobe: { title: "", description: "", keywords: [], category: "" },
     shutterstock: { title: "", description: "", keywords: [], category: "" },
+    magnific: { title: "", keywords: [], prompt: "", model: "" },
   };
 }
 
@@ -727,6 +742,30 @@ function normalize(
   return format === "adobe"
     ? { ...normalized, description: "" }
     : normalized;
+}
+
+function normalizeMagnific(
+  raw: unknown,
+  fallback: MagnificMetadata
+): MagnificMetadata {
+  if (!raw || typeof raw !== "object") return fallback;
+  const value = raw as {
+    title?: unknown;
+    keywords?: unknown;
+    prompt?: unknown;
+    model?: unknown;
+  };
+
+  const title = stripFilenameTokens(String(value.title ?? "").trim());
+  const prompt = String(value.prompt ?? "").trim();
+  const model = String(value.model ?? "").trim();
+
+  return {
+    title: title || fallback.title,
+    keywords: sanitizeKeywords(value.keywords, MAGNIFIC_KEYWORDS_MAX, fallback.keywords),
+    prompt: prompt || fallback.prompt,
+    model: model || fallback.model,
+  };
 }
 
 export async function testGeminiConnection(apiKey: string): Promise<number> {
@@ -859,11 +898,13 @@ export async function testMistralConnection(apiKey: string): Promise<number> {
 function parseMetadata(text: string): {
   adobe?: unknown;
   shutterstock?: unknown;
+  magnific?: unknown;
 } | null {
   try {
     const json = JSON.parse(extractJson(text)) as {
       adobe?: unknown;
       shutterstock?: unknown;
+      magnific?: unknown;
     } | null;
     return json && typeof json === "object" ? json : null;
   } catch {
@@ -879,6 +920,7 @@ function mergeRefinedMetadata(
   refined: {
     adobe?: unknown;
     shutterstock?: unknown;
+    magnific?: unknown;
   } | null
 ): GeneratedMetadata {
   if (!refined) return current;
@@ -889,6 +931,7 @@ function mergeRefinedMetadata(
       current.shutterstock,
       "shutterstock"
     ),
+    magnific: normalizeMagnific(refined.magnific, current.magnific),
   };
 }
 
@@ -947,7 +990,7 @@ async function runGenerationPipeline(args: {
   image: ImageAsset;
   fallback: GeneratedMetadata;
   settings: GenerationSettings;
-  platform: "adobe" | "shutterstock";
+  platform: MetadataMode;
   call: (
     prompt: string,
     includeImage?: boolean,
@@ -1033,6 +1076,7 @@ async function runGenerationPipeline(args: {
         fallback.shutterstock,
         "shutterstock"
       ),
+      magnific: normalizeMagnific(parsed.magnific, fallback.magnific),
     };
     profiler.end("metadata");
 

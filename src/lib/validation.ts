@@ -1,7 +1,9 @@
-import type { CsvFormat, GenerationResult, StockMetadata } from "@/lib/types";
+import type { CsvFormat, GenerationResult, MagnificMetadata, StockMetadata } from "@/lib/types";
 import {
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
+  MAGNIFIC_KEYWORDS_MAX,
+  MAGNIFIC_TITLE_MAX,
   SHUTTERSTOCK_KEYWORDS_MAX,
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
@@ -65,13 +67,34 @@ function validateShutterstock(meta: StockMetadata): string[] {
   return issues;
 }
 
+function validateMagnific(meta: MagnificMetadata): string[] {
+  const issues: string[] = [];
+  if (!meta.title.trim()) {
+    issues.push("Title is required");
+  } else if (meta.title.length > MAGNIFIC_TITLE_MAX) {
+    issues.push(
+      `Title must be ${MAGNIFIC_TITLE_MAX} characters or fewer`
+    );
+  }
+  if (meta.keywords.length === 0) {
+    issues.push("At least one keyword is required");
+  } else if (meta.keywords.length > MAGNIFIC_KEYWORDS_MAX) {
+    issues.push(
+      `Maximum ${MAGNIFIC_KEYWORDS_MAX} keywords allowed (${meta.keywords.length})`
+    );
+  }
+  if (meta.keywords.some((keyword) => keyword.includes(",")))
+    issues.push("Keywords cannot contain commas");
+  return issues;
+}
+
 export function validateMetadata(
-  meta: StockMetadata,
+  meta: StockMetadata | MagnificMetadata,
   format: CsvFormat
 ): string[] {
-  return format === "adobe"
-    ? validateAdobe(meta)
-    : validateShutterstock(meta);
+  if (format === "adobe") return validateAdobe(meta as StockMetadata);
+  if (format === "shutterstock") return validateShutterstock(meta as StockMetadata);
+  return validateMagnific(meta as MagnificMetadata);
 }
 
 export function validateResults(

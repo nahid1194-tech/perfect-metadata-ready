@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { Download, Loader2, RotateCcw, Square, Trash2, UploadCloud, WandSparkles } from "lucide-react"
 
-import { exportAdobeCsv, exportShutterstockCsv, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
+import { exportAdobeCsv, exportMagnificCsv, exportShutterstockCsv, fixMagnificMetadata, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
 import { pushToGitHub } from "@/lib/git-sync"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
 import { validateMetadata, validateResults } from "@/lib/validation"
@@ -127,7 +127,7 @@ export function UploadToolbar() {
         );
         return;
       }
-    } else {
+    } else if (format === "shutterstock") {
       let fixed = 0;
       for (const result of results) {
         if (
@@ -153,10 +153,37 @@ export function UploadToolbar() {
           `${fixed} row${fixed === 1 ? "" : "s"} fixed to match the Shutterstock CSV format before export.`
         );
       }
+    } else {
+      let fixed = 0;
+      for (const result of results) {
+        if (
+          validateMetadata(
+            result.metadata.magnific,
+            "magnific"
+          ).length === 0
+        )
+          continue;
+        const corrected = fixMagnificMetadata(
+          result.metadata.magnific
+        );
+        useAppStore.getState().updateResult(result.id, (current) => ({
+          ...current,
+          metadata: { ...current.metadata, magnific: corrected },
+        }));
+        fixed++;
+      }
+      if (fixed > 0) {
+        toast(
+          "info",
+          "CSV auto-corrected",
+          `${fixed} row${fixed === 1 ? "" : "s"} fixed to match the Magnific CSV format before export.`
+        );
+      }
     }
     try {
       if (format === "adobe") await exportAdobeCsv(results);
-      else await exportShutterstockCsv(results);
+      else if (format === "shutterstock") await exportShutterstockCsv(results);
+      else await exportMagnificCsv(results);
       const shortened = resolveExportFilenames(results, format).filter(
         (entry) => entry.shortened
       );

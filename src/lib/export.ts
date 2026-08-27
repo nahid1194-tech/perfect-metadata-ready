@@ -1,7 +1,9 @@
-import type { CsvFormat, GenerationResult, StockMetadata } from "@/lib/types";
+import type { CsvFormat, GenerationResult, MagnificMetadata, StockMetadata } from "@/lib/types";
 import {
   CSV_MAX_ROWS,
   FILENAME_MAX,
+  MAGNIFIC_KEYWORDS_MAX,
+  MAGNIFIC_TITLE_MAX,
   SHUTTERSTOCK_KEYWORDS_MAX,
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
@@ -90,6 +92,14 @@ export const SHUTTERSTOCK_FIELDS = [
   "Illustration",
   "Mature Content",
   "Editorial",
+];
+
+export const MAGNIFIC_FIELDS = [
+  "Filename",
+  "Title",
+  "Keywords",
+  "Prompt",
+  "Model",
 ];
 
 function assertRowLimit(results: GenerationResult[]) {
@@ -218,6 +228,32 @@ export function fixShutterstockMetadata(meta: StockMetadata): StockMetadata {
   };
 }
 
+export function fixMagnificMetadata(meta: MagnificMetadata): MagnificMetadata {
+  let title = meta.title.trim();
+  if (!title) title = "Untitled";
+  if (title.length > MAGNIFIC_TITLE_MAX) {
+    const words = title.split(/\s+/);
+    let fitted = "";
+    for (const word of words) {
+      const next = fitted ? `${fitted} ${word}` : word;
+      if (next.length > MAGNIFIC_TITLE_MAX) break;
+      fitted = next;
+    }
+    title = fitted;
+  }
+
+  let keywords = uniqueKeywords(meta.keywords);
+  if (keywords.length > MAGNIFIC_KEYWORDS_MAX)
+    keywords = keywords.slice(0, MAGNIFIC_KEYWORDS_MAX);
+
+  return {
+    title,
+    keywords,
+    prompt: meta.prompt.trim(),
+    model: meta.model.trim(),
+  };
+}
+
 function shutterstockRows(
   results: GenerationResult[],
   filenames: ResolvedFilename[]
@@ -232,6 +268,22 @@ function shutterstockRows(
       Illustration: "No",
       "Mature Content": "No",
       Editorial: "No",
+    };
+  });
+}
+
+function magnificRows(
+  results: GenerationResult[],
+  filenames: ResolvedFilename[]
+) {
+  return results.map((result, index) => {
+    const meta = fixMagnificMetadata(result.metadata.magnific);
+    return {
+      Filename: filenames[index].name,
+      Title: meta.title,
+      Keywords: meta.keywords.join(","),
+      Prompt: meta.prompt,
+      Model: meta.model,
     };
   });
 }
@@ -261,6 +313,19 @@ export async function buildShutterstockCsv(
   });
 }
 
+export async function buildMagnificCsv(
+  results: GenerationResult[]
+): Promise<string> {
+  assertRowLimit(results);
+  const filenames = resolveExportFilenames(results, "magnific");
+  const Papa = await getPapa();
+  const csv = Papa.unparse({
+    fields: MAGNIFIC_FIELDS,
+    data: magnificRows(results, filenames),
+  });
+  return csv.replace(/,/g, ";");
+}
+
 export async function exportAdobeCsv(
   results: GenerationResult[],
   releases = "No"
@@ -276,8 +341,17 @@ export async function exportShutterstockCsv(
   downloadBlob(encodeCsv(csv), `shutterstock-${dateStamp()}.csv`);
 }
 
+export async function exportMagnificCsv(
+  results: GenerationResult[]
+): Promise<void> {
+  const csv = await buildMagnificCsv(results);
+  downloadBlob(encodeCsv(csv), `magnific-${dateStamp()}.csv`);
+}
+
 export function formatHint(format: CsvFormat): string {
-  return format === "adobe"
-    ? "Columns: Filename, Title, Keywords, Category, Releases"
-    : "Columns: Filename, Description, Keywords, Categories, Illustration, Mature Content, Editorial";
+  if (format === "adobe")
+    return "Columns: Filename, Title, Keywords, Category, Releases";
+  if (format === "shutterstock")
+    return "Columns: Filename, Description, Keywords, Categories, Illustration, Mature Content, Editorial";
+  return "Columns: Filename, Title, Keywords, Prompt, Model (semicolon-separated CSV)";
 }

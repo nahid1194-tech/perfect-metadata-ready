@@ -32,7 +32,7 @@ export type ImageAsset = {
   epsStatus?: EpsConversionStatus;
 };
 
-export type MetadataMode = "adobe" | "shutterstock";
+export type MetadataMode = "adobe" | "shutterstock" | "magnific";
 
 export type StockMetadata = {
   title: string;
@@ -41,9 +41,17 @@ export type StockMetadata = {
   category: string;
 };
 
+export type MagnificMetadata = {
+  title: string;
+  keywords: string[];
+  prompt: string;
+  model: string;
+};
+
 export type GeneratedMetadata = {
   adobe: StockMetadata;
   shutterstock: StockMetadata;
+  magnific: MagnificMetadata;
 };
 
 export type GenerationResult = {
@@ -56,7 +64,7 @@ export type GenerationResult = {
   timingMs?: Record<string, number>;
 };
 
-export type CsvFormat = "adobe" | "shutterstock";
+export type CsvFormat = "adobe" | "shutterstock" | "magnific";
 
 export type GenerationMode = "auto" | "api";
 
@@ -200,7 +208,7 @@ export type ApiKeyEntry = {
   modelsFetchedAt?: number | null;
 };
 
-export type Marketplace = "adobe" | "shutterstock";
+export type Marketplace = "adobe" | "shutterstock" | "magnific";
 
 export type GenerationSettings = {
   platform: Marketplace;
@@ -269,7 +277,9 @@ export type ValidationComponent =
   | "title"
   | "description"
   | "keywords"
-  | "category";
+  | "category"
+  | "prompt"
+  | "model";
 
 export type ValidationSeverity = "error" | "warning";
 

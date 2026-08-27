@@ -5,6 +5,9 @@ export const SHUTTERSTOCK_TITLE_MAX = 2048;
 export const SHUTTERSTOCK_KEYWORDS_MIN = 7;
 export const SHUTTERSTOCK_KEYWORDS_MAX = 50;
 
+export const MAGNIFIC_TITLE_MAX = 100;
+export const MAGNIFIC_KEYWORDS_MAX = 50;
+
 export const FILENAME_MAX = 30;
 export const CSV_MAX_ROWS = 5000;
 

@@ -2,6 +2,7 @@ import type {
   CsvFormat,
   GeneratedMetadata,
   GenerationSettings,
+  MagnificMetadata,
   StockMetadata,
   ValidationComponent,
   ValidationIssue,
@@ -196,7 +197,7 @@ function validateKeywords(
   errors: ValidationIssue[],
   warnings: ValidationIssue[]
 ): void {
-  const target = format === "adobe" ? limits.adobe.keywordCount : limits.shutterstock.keywordCount;
+  const target = format === "adobe" ? limits.adobe.keywordCount : format === "shutterstock" ? limits.shutterstock.keywordCount : limits.magnific.keywordCount;
   if (keywords.length === 0) {
     errors.push(
       issue(format, "keywords", "error", "At least one keyword is required")
@@ -477,6 +478,50 @@ function validateShutterstock(
   );
 }
 
+function validateMagnific(
+  meta: MagnificMetadata,
+  rules: ReturnType<typeof rulesFor>,
+  limits: ReturnType<typeof resolveLimits>,
+  errors: ValidationIssue[],
+  warnings: ValidationIssue[]
+): void {
+  const title = meta.title.trim();
+  if (!title) {
+    errors.push(issue("magnific", "title", "error", "Title is required"));
+  } else {
+    if (title.length > rules.titleMax) {
+      errors.push(
+        issue(
+          "magnific",
+          "title",
+          "error",
+          `Title must be ${rules.titleMax} characters or fewer`
+        )
+      );
+    }
+    if (rules.titleListPattern.test(title)) {
+      errors.push(
+        issue(
+          "magnific",
+          "title",
+          "error",
+          "Title reads like a list of keywords rather than a natural phrase"
+        )
+      );
+    }
+    validateText("magnific", "title", title, rules, errors, warnings);
+  }
+
+  validateKeywords(
+    "magnific",
+    meta.keywords,
+    rules,
+    limits,
+    errors,
+    warnings
+  );
+}
+
 export function validateGeneratedMetadata(
   metadata: GeneratedMetadata,
   settings: GenerationSettings
@@ -484,6 +529,7 @@ export function validateGeneratedMetadata(
   const limits = resolveLimits(settings);
   const adobeRules = rulesFor("adobe");
   const shutterstockRules = rulesFor("shutterstock");
+  const magnificRules = rulesFor("magnific");
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
 
@@ -497,6 +543,13 @@ export function validateGeneratedMetadata(
   validateShutterstock(
     metadata.shutterstock,
     shutterstockRules,
+    limits,
+    errors,
+    warnings
+  );
+  validateMagnific(
+    metadata.magnific,
+    magnificRules,
     limits,
     errors,
     warnings

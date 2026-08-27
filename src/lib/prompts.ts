@@ -49,8 +49,8 @@ function asStringArray(value: unknown): string[] {
 export function buildSettingsPrompt(settings: GenerationSettings): string {
   const limits = resolveLimits(settings);
   const parts: string[] = [
-    `Title length: exactly ${limits.adobe.titleMax} characters or fewer for adobe.title and exactly ${limits.shutterstock.titleMax} characters or fewer for shutterstock.title. Never exceed the limit and always end on a complete word; if too long, rewrite the title shorter.`,
-    `Keywords: adobe.keywords must contain EXACTLY ${limits.adobe.keywordCount} unique keywords and shutterstock.keywords must contain EXACTLY ${limits.shutterstock.keywordCount} unique keywords.`,
+    `Title length: exactly ${limits.adobe.titleMax} characters or fewer for adobe.title and exactly ${limits.shutterstock.titleMax} characters or fewer for shutterstock.title and exactly ${limits.magnific.titleMax} characters or fewer for magnific.title. Never exceed the limit and always end on a complete word; if too long, rewrite the title shorter.`,
+    `Keywords: adobe.keywords must contain EXACTLY ${limits.adobe.keywordCount} unique keywords, shutterstock.keywords must contain EXACTLY ${limits.shutterstock.keywordCount} unique keywords, and magnific.keywords must contain EXACTLY ${limits.magnific.keywordCount} unique keywords.`,
     `Description: up to ${settings.descriptionLength} characters.`,
   ];
   if (settings.enablePrefix && settings.prefix.trim()) {
@@ -168,29 +168,32 @@ export function buildMetadataPrompt(args: {
   settings: GenerationSettings;
   bgRules: string;
   analysis: ImageAnalysis;
-  platform: "adobe" | "shutterstock";
+  platform: "adobe" | "shutterstock" | "magnific";
 }): string {
   const { settings, bgRules, analysis, platform } = args;
   const rules = rulesFor(platform);
 
-  const otherMarketplace =
-    platform === "adobe" ? "shutterstock" : "adobe";
-
   const keywordTarget =
     platform === "adobe"
       ? resolveLimits(settings).adobe.keywordCount
-      : resolveLimits(settings).shutterstock.keywordCount;
+      : platform === "shutterstock"
+        ? resolveLimits(settings).shutterstock.keywordCount
+        : resolveLimits(settings).magnific.keywordCount;
 
-  const sectionSpecific = (mp: "adobe" | "shutterstock"): string => {
+  const sectionSpecific = (mp: "adobe" | "shutterstock" | "magnific"): string => {
     const r = rulesFor(mp);
-    const category =
-      mp === "adobe"
-        ? interpolate(r.categoryGuidance, {
-            ADOBE_CATEGORIES: ADOBE_CATEGORY_GUIDE,
-          })
-        : interpolate(r.categoryGuidance, {
-            SHUTTERSTOCK_CATEGORIES: SHUTTERSTOCK_CATEGORY_GUIDE,
-          });
+    let category = "";
+    if (mp === "adobe") {
+      category = interpolate(r.categoryGuidance, {
+        ADOBE_CATEGORIES: ADOBE_CATEGORY_GUIDE,
+      });
+    } else if (mp === "shutterstock") {
+      category = interpolate(r.categoryGuidance, {
+        SHUTTERSTOCK_CATEGORIES: SHUTTERSTOCK_CATEGORY_GUIDE,
+      });
+    } else {
+      category = r.categoryGuidance;
+    }
     const title = interpolate(r.titleGuidance, {
       titleMax: String(r.titleMax),
     });
@@ -220,33 +223,41 @@ VERIFIED BACKGROUND FACTS (from pixel analysis — keep strictly consistent):
 ${bgRules}
 
 TARGET MARKETPLACE: ${rules.label}
-Generate metadata for BOTH marketplaces, but the ${rules.label} section is the primary target and must be optimized with the highest accuracy and searchability.
+Generate metadata for ALL THREE marketplaces, but the ${rules.label} section is the primary target and must be optimized with the highest accuracy and searchability.
 
 ${sectionSpecific("adobe")}
 
 ${sectionSpecific("shutterstock")}
 
+${sectionSpecific("magnific")}
+
 === ADDITIONAL RULES ===
-TITLE (both marketplaces):
+TITLE (all marketplaces):
 - The title must describe the image accurately and naturally, NOT be a list of keywords, and must respect each marketplace's character limit, always ending on a complete word.
 - Never include generic filler such as "professional", "high quality", "premium", "beautiful", or "stunning".
 - Never include brands, logos, trademarks, camera information, model numbers, or artist names.
 
-KEYWORDS (both marketplaces):
+KEYWORDS (all marketplaces):
 - Each keyword must be ONE word or a natural TWO-word phrase. NEVER more than two words.
 - STRONGLY prefer single-word keywords over two-word phrases. Only use a two-word phrase when the single word alone would lose critical meaning (e.g., "latte art" is better than "latte" + "art").
 - Put the strongest, most searchable high-intent terms first: primary subject → action → important objects → style → medium → colors → composition → setting → commercial concepts.
-- ${platform === "adobe" ? `For ${rules.label}: exactly ${keywordTarget} keywords.` : `For ${rules.label}: exactly ${keywordTarget} keywords (within the ${rules.keywordMin}-${rules.keywordMax} range).`}
-- For the OTHER marketplace (${otherMarketplace}), also provide the count specified in the marketplace section above.
+- For ${rules.label}: exactly ${keywordTarget} keywords.
+- For the OTHER marketplaces, also provide the count specified in their respective marketplace sections above.
 - Every keyword must be visually supported by the image analysis.
 - NO duplicates or near-duplicates (case-insensitive). For example, "business" and "business strategy" are near-duplicates — keep only the stronger one.
 - NO truncated words, filename fragments, UUIDs, SEO filler, or weak generic terms.
 - NO keyword stuffing: do not pad the list with weak or loosely related terms just to hit the count. Quality over quantity.
 - Never use brands, trademarks, camera info, or unrelated trending terms.
 
-${platform === "shutterstock" ? "DESCRIPTION:\n- 1-2 factual sentences describing the subject, setting, and action (no marketing language).\n\n" : ""}CATEGORY:
+MAGNIFIC SPECIFIC RULES:
+- magnific.prompt: Write a brief, descriptive prompt that could recreate this image with an AI image generator (e.g. "A serene mountain landscape at golden hour with a calm lake reflection").
+- magnific.model: Write "AI Generated" or the specific AI model if known.
+- Always include '_ai_generated' in magnific.keywords for AI-generated content.
+
+CATEGORY:
 - adobe.category: the single numeric ID (1-21) whose label best fits the actual asset, from the Adobe category list.
 - shutterstock.category: 1-2 exact official category names.
+- magnific.category: leave empty (not used in Magnific CSV).
 
 CONSISTENCY:
 - The title, description, and keywords must all describe the SAME image. Every major concept in the title must be reflected in the keywords.
@@ -255,7 +266,7 @@ USER PREFERENCES:
 ${buildSettingsPrompt(settings)}
 
 Return ONLY this JSON (no markdown, no comments):
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}`;
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""}}`;
 }
 
 export function buildRefinePrompt(args: {
@@ -264,16 +275,20 @@ export function buildRefinePrompt(args: {
   analysis: ImageAnalysis;
   metadata: GeneratedMetadata;
   issues: ValidationIssue[];
-  platform: "adobe" | "shutterstock";
+  platform: "adobe" | "shutterstock" | "magnific";
 }): string {
   const { settings, bgRules, analysis, metadata, issues, platform } = args;
   const failing = issues
     .filter((issue) => issue.format === platform)
     .map((issue) => `- ${issue.component.toUpperCase()}: ${issue.message}`);
 
-  const relevantSection = (platform === "adobe" ? metadata.adobe : metadata.shutterstock);
+  const relevantSection = platform === "adobe" 
+    ? metadata.adobe 
+    : platform === "shutterstock" 
+      ? metadata.shutterstock 
+      : metadata.magnific;
 
-  return `You are an expert metadata writer. Some parts of the generated ${platform} metadata below FAILED quality validation. Regenerate ONLY the ${platform} metadata (the full JSON for ${platform} only is NOT required — return the complete JSON for BOTH marketplaces), fixing every issue listed, while keeping everything that was already correct.
+  return `You are an expert metadata writer. Some parts of the generated ${platform} metadata below FAILED quality validation. Regenerate ONLY the ${platform} metadata (the full JSON for ${platform} only is NOT required — return the complete JSON for ALL marketplaces), fixing every issue listed, while keeping everything that was already correct.
 
 ${FILENAME_INSTRUCTION}
 
@@ -297,6 +312,6 @@ Rules to enforce:
 - The title must be accurate, natural, within the character limit, end on a complete word, and never be a keyword list or contain filler/brands/camera info.
 - Only use terms supported by the visual analysis.
 - Fix ONLY the failing components; do not change unrelated content.
-- Return the COMPLETE JSON for BOTH marketplaces, with ${platform} fixed and the other marketplace unchanged:
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""}}`;
+- Return the COMPLETE JSON for ALL marketplaces, with ${platform} fixed and the others unchanged:
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""}}`;
 }

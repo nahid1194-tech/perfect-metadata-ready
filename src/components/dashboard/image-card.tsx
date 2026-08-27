@@ -9,6 +9,8 @@ import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
 import {
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
+  MAGNIFIC_KEYWORDS_MAX,
+  MAGNIFIC_TITLE_MAX,
   SHUTTERSTOCK_KEYWORDS_MAX,
   SHUTTERSTOCK_KEYWORDS_MIN,
   SHUTTERSTOCK_TITLE_MAX,
@@ -49,16 +51,18 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const [timingOpen, setTimingOpen] = useState(false);
 
   const format = marketplaceFormat(platform);
-  const metadata = result.metadata[format];
+  const isMagnific = format === "magnific";
+  const metadata = isMagnific ? result.metadata.magnific : result.metadata[format];
   const isAdobe = format === "adobe";
-  const keywordMax = isAdobe ? ADOBE_KEYWORDS_MAX : SHUTTERSTOCK_KEYWORDS_MAX;
+  const isShutterstock = format === "shutterstock";
+  const keywordMax = isAdobe ? ADOBE_KEYWORDS_MAX : isShutterstock ? SHUTTERSTOCK_KEYWORDS_MAX : MAGNIFIC_KEYWORDS_MAX;
 
   const previewable =
     image && (image.type.startsWith("image/") || image.type.startsWith("video/"));
   const previewSrc = image?.previewUrl ?? image?.apiDataUrl ?? image?.dataUrl;
   const previewIsVideo = image?.type.startsWith("video/") ?? false;
 
-  const patch = (field: keyof typeof metadata, value: string | string[]) =>
+  const patch = (field: string, value: string | string[]) =>
     updateResult(result.id, (current) => ({
       ...current,
       metadata: {
@@ -167,16 +171,17 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
               value={metadata.title}
               onChange={(e) => patch("title", e.target.value)}
               className={cn(
-                isAdobe &&
-                  metadata.title.length > ADOBE_TITLE_MAX &&
+                (isAdobe && metadata.title.length > ADOBE_TITLE_MAX) ||
+                  (isMagnific && metadata.title.length > MAGNIFIC_TITLE_MAX) &&
                   "border-destructive focus-visible:border-destructive"
               )}
             />
             <div className="flex items-center justify-between">
               <Counter
                 value={metadata.title.length}
-                max={isAdobe ? ADOBE_TITLE_MAX : undefined}
-                error={isAdobe && metadata.title.length > ADOBE_TITLE_MAX}
+                max={isAdobe ? ADOBE_TITLE_MAX : isMagnific ? MAGNIFIC_TITLE_MAX : undefined}
+                error={(isAdobe && metadata.title.length > ADOBE_TITLE_MAX) ||
+                  (isMagnific && metadata.title.length > MAGNIFIC_TITLE_MAX)}
               />
               {isAdobe && metadata.title.includes(",") ? (
                 <p className="text-xs font-medium text-destructive">
@@ -186,28 +191,56 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
             </div>
           </div>
 
-          {!isAdobe ? (
+          {isShutterstock ? (
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
                 <Label>Description</Label>
-                <CopyButton text={metadata.description} />
+                <CopyButton text={(metadata as { description?: string }).description ?? ""} />
               </div>
               <Textarea
-                value={metadata.description}
+                value={(metadata as { description?: string }).description ?? ""}
                 onChange={(e) => patch("description", e.target.value)}
                 rows={3}
               />
               <div className="flex items-center justify-between">
                 <Counter
-                  value={metadata.description.length}
+                  value={((metadata as { description?: string }).description ?? "").length}
                   max={SHUTTERSTOCK_TITLE_MAX}
-                  error={metadata.description.length > SHUTTERSTOCK_TITLE_MAX}
+                  error={((metadata as { description?: string }).description ?? "").length > SHUTTERSTOCK_TITLE_MAX}
                 />
-                {!metadata.description.trim() ? (
+                {!(metadata as { description?: string }).description?.trim() ? (
                   <p className="text-xs font-medium text-destructive">Required</p>
                 ) : null}
               </div>
             </div>
+          ) : null}
+
+          {isMagnific ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Prompt</Label>
+                  <CopyButton text={(metadata as { prompt?: string }).prompt ?? ""} />
+                </div>
+                <Textarea
+                  value={(metadata as { prompt?: string }).prompt ?? ""}
+                  onChange={(e) => patch("prompt", e.target.value)}
+                  rows={2}
+                  placeholder="AI generation prompt"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <Label>Model</Label>
+                  <CopyButton text={(metadata as { model?: string }).model ?? ""} />
+                </div>
+                <Input
+                  value={(metadata as { model?: string }).model ?? ""}
+                  onChange={(e) => patch("model", e.target.value)}
+                  placeholder="AI Generated"
+                />
+              </div>
+            </>
           ) : null}
 
           <div className="flex flex-col gap-1.5">
@@ -219,18 +252,20 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
               keywords={metadata.keywords}
               onChange={(keywords) => patch("keywords", keywords)}
               max={keywordMax}
-              min={isAdobe ? 0 : SHUTTERSTOCK_KEYWORDS_MIN}
+              min={isShutterstock ? SHUTTERSTOCK_KEYWORDS_MIN : 0}
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>Category</Label>
-            <CategoryEditor
-              mode={format}
-              value={metadata.category}
-              onChange={(category) => patch("category", category)}
-            />
-          </div>
+          {!isMagnific ? (
+            <div className="flex flex-col gap-1.5">
+              <Label>Category</Label>
+              <CategoryEditor
+                mode={format}
+                value={(metadata as { category?: string }).category ?? ""}
+                onChange={(category) => patch("category", category)}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t pt-3">

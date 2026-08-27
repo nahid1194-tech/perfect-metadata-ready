@@ -6,6 +6,7 @@ import { Menu, X } from "lucide-react"
 
 import { ensureModelCache } from "@/lib/models"
 import { ControlCard } from "@/components/dashboard/control-card"
+import { ExportSection } from "@/components/dashboard/export-section"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
 import { ResultsSection } from "@/components/dashboard/results-section"
@@ -54,6 +55,8 @@ export function DashboardShell() {
   const settings = (
     <>
       <ControlCard />
+      <div className="my-6 h-px bg-border" />
+      <ExportSection />
       <div className="my-6 h-px bg-border" />
       <MetadataSettings />
     </>

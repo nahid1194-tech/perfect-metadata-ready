@@ -7,6 +7,7 @@ export const MARKETPLACES: {
 }[] = [
   { id: "adobe", label: "Adobe Stock", format: "adobe" },
   { id: "shutterstock", label: "Shutterstock", format: "shutterstock" },
+  { id: "magnific", label: "Magnific", format: "magnific" },
 ];
 
 export function marketplaceFormat(platform: Marketplace): CsvFormat {

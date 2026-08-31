@@ -1,8 +1,14 @@
 "use client"
 
-import { Aperture, Camera, Image } from "lucide-react"
+import { Aperture, Brain, Camera, Image, Zap } from "lucide-react"
 
 import type { Marketplace } from "@/lib/types"
+import {
+  type ThinkingLevel,
+  THINKING_OPTION_LABELS,
+  THINKING_UNAVAILABLE_NOTE,
+  supportsThinking,
+} from "@/lib/thinking"
 import { MARKETPLACES, marketplaceFormat } from "@/lib/marketplace"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -19,6 +25,11 @@ const PLATFORM_ICONS: Record<Marketplace, React.ComponentType<{ className?: stri
 export function MetadataSettings() {
   const settings = useAppStore((state) => state.settings);
   const setSettings = useAppStore((state) => state.setSettings);
+  const providerModels = useAppStore((state) => state.providerModels);
+  const primaryGeminiModel = providerModels.gemini[0] ?? "";
+  const thinkingUnavailable = primaryGeminiModel
+    ? !supportsThinking(primaryGeminiModel)
+    : false;
   const isAdobe = marketplaceFormat(settings.platform) === "adobe";
 
   return (
@@ -94,6 +105,44 @@ export function MetadataSettings() {
           max={8}
           onChange={(value) => setSettings({ maxConcurrent: value })}
         />
+
+        <div className="flex flex-col gap-2.5">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Thinking Level
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {(Object.keys(THINKING_OPTION_LABELS) as ThinkingLevel[]).map(
+              (level) => {
+                const active = settings.thinkingLevel === level;
+                const Icon = level === "HIGH" ? Brain : Zap;
+                return (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setSettings({ thinkingLevel: level })}
+                    aria-pressed={active}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-sm font-medium transition-colors",
+                      active
+                        ? "border-primary bg-primary/5 text-foreground ring-2 ring-primary/20"
+                        : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                    )}
+                  >
+                    <Icon className="size-4 shrink-0" />
+                    <span className="truncate">
+                      {THINKING_OPTION_LABELS[level].label}
+                    </span>
+                  </button>
+                );
+              }
+            )}
+          </div>
+          {thinkingUnavailable ? (
+            <p className="text-xs text-muted-foreground">
+              {THINKING_UNAVAILABLE_NOTE}
+            </p>
+          ) : null}
+        </div>
 
         <div className="h-px bg-border" />
 

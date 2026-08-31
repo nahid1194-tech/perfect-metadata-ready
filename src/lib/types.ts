@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from "@/lib/thinking";
+
 export type EpsConversionStatus =
   | "queued"
   | "uploading"
@@ -272,6 +274,7 @@ export type GenerationSettings = {
   enableNegativeTitleWords: boolean;
   enableNegativeKeywords: boolean;
   maxConcurrent: number;
+  thinkingLevel: ThinkingLevel;
 };
 
 export type GitSyncConfig = {

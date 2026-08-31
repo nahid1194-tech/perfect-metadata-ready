@@ -56,6 +56,15 @@ import {
   DEFAULT_CONTENT_CHECK,
   normalizeContentCheck,
 } from "@/lib/content-check";
+import {
+  type ThinkingConfigResolved,
+  type ThinkingLevel,
+  isKnownThinkingUnsupported,
+  isThinkingParamError,
+  markThinkingUnsupported,
+  resolveThinkingConfig,
+  supportsThinking,
+} from "@/lib/thinking";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -378,6 +387,7 @@ export const DEFAULT_GENERATION_SETTINGS: GenerationSettings = {
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
   maxConcurrent: 3,
+  thinkingLevel: "LOW",
 };
 
 function splitKeywordPhrase(phrase: string): string[] {
@@ -1202,6 +1212,7 @@ async function callGemini(
   apiKey: string,
   model: string,
   temperature: number,
+  thinking?: ThinkingConfigResolved | null,
   signal?: AbortSignal
 ): Promise<string> {
   let response: Response;
@@ -1218,6 +1229,14 @@ async function callGemini(
             temperature,
             responseMimeType: "application/json",
             maxOutputTokens: 4096,
+            ...(thinking
+              ? {
+                  thinkingConfig:
+                    thinking.kind === "budget"
+                      ? { thinkingBudget: thinking.value }
+                      : { thinkingLevel: thinking.value },
+                }
+              : {}),
           },
         }),
       }
@@ -1259,6 +1278,37 @@ async function callGemini(
   );
 }
 
+async function callGeminiWithThinking(
+  parts: unknown[],
+  apiKey: string,
+  model: string,
+  temperature: number,
+  level: ThinkingLevel,
+  signal?: AbortSignal
+): Promise<string> {
+  const thinking =
+    level && supportsThinking(model) && !isKnownThinkingUnsupported(model)
+      ? resolveThinkingConfig(model, level)
+      : null;
+  try {
+    return await callGemini(parts, apiKey, model, temperature, thinking, signal);
+  } catch (error) {
+    if (thinking && isThinkingParamError(error, model)) {
+      markThinkingUnsupported(model);
+      devLog({
+        event: "thinking-parameter-retry",
+        model,
+        detail:
+          error instanceof Error
+            ? error.message
+            : String(error ?? "unknown error"),
+      });
+      return callGemini(parts, apiKey, model, temperature, null, signal);
+    }
+    throw error;
+  }
+}
+
 async function analysisImageParts(
   image: ImageAsset,
   dimension = ANALYSIS_MAX_DIMENSION
@@ -1297,7 +1347,14 @@ export async function generateWithApi(
         ? await analysisImageParts(image, dimension)
         : [];
       parts.push({ text: prompt });
-      return callGemini(parts, apiKey, model, 0.3, signal);
+      return callGeminiWithThinking(
+        parts,
+        apiKey,
+        model,
+        0.3,
+        fullSettings.thinkingLevel,
+        signal
+      );
     },
   });
 

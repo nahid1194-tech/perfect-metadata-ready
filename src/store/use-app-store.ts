@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS: GenerationSettings = {
   enableNegativeTitleWords: false,
   enableNegativeKeywords: false,
   maxConcurrent: 3,
+  thinkingLevel: "LOW",
 };
 
 export const DEFAULT_GIT_CONFIG: GitSyncConfig = {

@@ -13,6 +13,7 @@ function settingsSignature(settings: GenerationSettings): string {
     negativeKeywords: settings.enableNegativeKeywords
       ? settings.negativeKeywords
       : "",
+    thinkingLevel: settings.thinkingLevel,
   };
   return JSON.stringify(pick);
 }

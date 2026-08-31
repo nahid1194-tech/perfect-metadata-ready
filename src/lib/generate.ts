@@ -38,6 +38,7 @@ import { stripFilenameTokens } from "@/lib/filename";
 import {
   buildAnalysisPrompt,
   buildMetadataPrompt,
+  buildMetadataPromptFast,
   buildRefinePrompt,
   EMPTY_ANALYSIS,
   extractJson,
@@ -1021,6 +1022,7 @@ async function runGenerationPipeline(args: {
   fallback: GeneratedMetadata;
   settings: GenerationSettings;
   platform: MetadataMode;
+  fast?: boolean;
   call: (
     prompt: string,
     includeImage?: boolean,
@@ -1031,8 +1033,15 @@ async function runGenerationPipeline(args: {
   report: ValidationReport;
   timing: Record<string, number>;
 }> {
-  const { image, fallback, settings, platform, call } = args;
+  const { image, fallback, settings, platform, fast = false, call } = args;
   const profiler = createProfiler();
+
+  // FAST (LOW thinking) single-pass path: analyze the attached image AND
+  // generate the complete metadata in ONE request, skipping the separate
+  // analysis round-trip and the higher-resolution quality fallback pass.
+  if (fast) {
+    return runFastPass({ image, fallback, settings, platform, call, profiler });
+  }
 
   const runPass = async (
     dimension: number
@@ -1207,6 +1216,118 @@ async function runGenerationPipeline(args: {
   throw new MetadataQualityError(validationError(primary.report));
 }
 
+// FAST single-pass generation. One image-attached request returns the whole
+// metadata object (same top-level JSON schema as the normal pipeline). Runs a
+// fix-only refinement round only if validation fails; no separate analysis
+// request and no higher-resolution quality fallback are performed.
+async function runFastPass(args: {
+  image: ImageAsset;
+  fallback: GeneratedMetadata;
+  settings: GenerationSettings;
+  platform: MetadataMode;
+  call: (
+    prompt: string,
+    includeImage?: boolean,
+    dimension?: number
+  ) => Promise<string>;
+  profiler: ReturnType<typeof createProfiler>;
+}): Promise<{
+  metadata: GeneratedMetadata;
+  report: ValidationReport;
+  timing: Record<string, number>;
+}> {
+  const { image, fallback, settings, platform, call, profiler } = args;
+  const { background } = await getPreparedAnalysis(image, ANALYSIS_MAX_DIMENSION);
+  const bgRules = backgroundRules(background);
+
+  profiler.start("metadata");
+  const prompt = buildMetadataPromptFast({ settings, bgRules, platform });
+  const raw = await call(prompt, true, ANALYSIS_MAX_DIMENSION);
+  const parsed = parseMetadata(raw);
+  if (!parsed) {
+    devLog({
+      event: "metadata-parse-failed",
+      imageId: image.id,
+      name: image.name,
+      platform,
+    });
+    throw new MetadataQualityError(
+      `Metadata response could not be parsed for "${image.name}"`
+    );
+  }
+  profiler.end("metadata");
+
+  let metadata: GeneratedMetadata = {
+    adobe: normalize(parsed.adobe, fallback.adobe, "adobe"),
+    shutterstock: normalize(
+      parsed.shutterstock,
+      fallback.shutterstock,
+      "shutterstock"
+    ),
+    magnific: normalizeMagnific(parsed.magnific, fallback.magnific),
+    editorialAssessment: normalizeEditorialAssessment(
+      parsed.editorialAssessment,
+      fallback.editorialAssessment
+    ),
+    contentCheck: normalizeContentCheck(
+      parsed.contentCheck,
+      fallback.contentCheck
+    ),
+  };
+
+  let report = validateGeneratedMetadata(metadata, settings);
+  devLog({
+    event: "validation",
+    imageId: image.id,
+    name: image.name,
+    errors: report.errors.map(
+      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+    ),
+    warnings: report.warnings.map(
+      (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+    ),
+  });
+
+  for (
+    let round = 0;
+    round < REFINE_MAX_ROUNDS && report.errors.length > 0;
+    round++
+  ) {
+    const refinePrompt = buildRefinePrompt({
+      settings,
+      bgRules,
+      analysis: EMPTY_ANALYSIS,
+      metadata,
+      issues: report.errors,
+      platform,
+    });
+    const refinedRaw = await call(refinePrompt, true, ANALYSIS_MAX_DIMENSION);
+    const refined = parseMetadata(refinedRaw);
+    if (!refined) break;
+    metadata = mergeRefinedMetadata(metadata, refined);
+    report = validateGeneratedMetadata(metadata, settings);
+  }
+
+  if (report.errors.length > 0) {
+    devLog({
+      event: "validation-remaining",
+      imageId: image.id,
+      name: image.name,
+      errors: report.errors.map(
+        (issue) => `[${issue.format}][${issue.component}] ${issue.message}`
+      ),
+    });
+    throw new MetadataQualityError(
+      `Metadata still fails validation for "${image.name}" after refinement: ${report.errors
+        .map((issue) => `[${issue.format}][${issue.component}] ${issue.message}`)
+        .join("; ")}`
+    );
+  }
+
+  logProfile(`${image.name}:generate-fast`, profiler.result());
+  return { metadata, report, timing: profiler.result() };
+}
+
 async function callGemini(
   parts: unknown[],
   apiKey: string,
@@ -1336,12 +1457,14 @@ export async function generateWithApi(
     ...settings,
   };
   const fallback = buildNeutralMetadata();
+  const fast = fullSettings.thinkingLevel === "LOW";
 
   const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
+    fast,
     call: async (prompt, includeImage = true, dimension) => {
       const parts = includeImage
         ? await analysisImageParts(image, dimension)
@@ -1445,12 +1568,14 @@ export async function generateWithOpenAI(
     ...settings,
   };
   const fallback = buildNeutralMetadata();
+  const fast = fullSettings.thinkingLevel === "LOW";
 
   const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
+    fast,
     call: async (prompt, includeImage = true, dimension) => {
       let imageUrl: string | undefined;
       if (includeImage) {
@@ -1561,12 +1686,14 @@ export async function generateWithMistral(
     ...settings,
   };
   const fallback = buildNeutralMetadata();
+  const fast = fullSettings.thinkingLevel === "LOW";
 
   const pipeline = await runGenerationPipeline({
     image,
     fallback,
     settings: fullSettings,
     platform: fullSettings.platform,
+    fast,
     call: async (prompt, includeImage = true, dimension) => {
       let imageUrl: string | undefined;
       if (includeImage) {

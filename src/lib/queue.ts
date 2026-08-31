@@ -45,7 +45,6 @@ import {
   refreshProviderModels,
 } from "@/lib/models";
 import { GEMINI_MULTI_MODEL_FALLBACK } from "@/lib/model-catalog";
-import { backoffDelayMs } from "@/lib/rate-limiter";
 import type {
   ApiKeyEntry,
   ApiProvider,
@@ -68,6 +67,16 @@ const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 
 // Maximum number of images processed with a live AI request at the same time.
 export const MAX_CONCURRENT_GENERATIONS = 4;
+
+// Faster per-request retry pacing for LOW (fast) mode. The normal pipeline
+// uses longer waits; fast mode keeps requests moving with minimal delay.
+function networkRetryDelayMs(fast: boolean): number {
+  return fast ? 300 : 1000;
+}
+
+function isFastMode(): boolean {
+  return useAppStore.getState().settings.thinkingLevel === "LOW";
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -223,7 +232,15 @@ async function waitForRateLimit(
   error: RateLimitedError,
   controller: AbortController
 ): Promise<void> {
-  const delayMs = Math.max(backoffDelayMs(backoffAttempt), error.delayMs);
+  const fast = isFastMode();
+  const steps = fast
+    ? [5_000, 10_000, 20_000, 30_000]
+    : [30_000, 60_000, 120_000, 240_000];
+  const stepIndex = Math.min(
+    Math.max(0, Math.floor(backoffAttempt)),
+    steps.length - 1
+  );
+  const delayMs = Math.max(steps[stepIndex], error.delayMs);
   backoffAttempt++;
   const endAt = Date.now() + delayMs;
   const initialSeconds = Math.max(1, Math.ceil(delayMs / 1000));
@@ -286,6 +303,7 @@ async function generateWithKeys(
   signal: AbortSignal
 ): Promise<GenerationResult> {
   const store = useAppStore.getState();
+  const fast = settings.thinkingLevel === "LOW";
   const keys = activeKeys(store.apiKeys, provider);
   if (keys.length === 0) throw new NoActiveKeyError();
 
@@ -369,7 +387,7 @@ async function generateWithKeys(
 
           if (isNetworkError(error) && networkRetries < 2) {
             networkRetries++;
-            await sleepCancellable(1000, signal);
+            await sleepCancellable(networkRetryDelayMs(fast), signal);
             continue;
           }
           if (isInvalidImageError(error)) throw error;

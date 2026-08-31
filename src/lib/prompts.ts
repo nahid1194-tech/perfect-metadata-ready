@@ -314,6 +314,100 @@ Return ONLY this JSON (no markdown, no comments):
 {"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""},"contentCheck":{"riskLevel":"LOW or REVIEW or HIGH or VERY_HIGH","confidence":0,"issues":[{"category":"IP or QUALITY or METADATA or AI or VECTOR or SIMILARITY or EDITORIAL or RELEASE","severity":"LOW or MEDIUM or HIGH","reason":"Short user-facing explanation"}],"recommendation":"Short recommendation"}}`;
 }
 
+// FAST (LOW thinking) prompt. Analyzes the attached image and returns the
+// complete metadata in a SINGLE request. Deliberately omits the verbose
+// editorial-classification and content-risk advisory blocks so generation is
+// as fast as possible while keeping full title/keyword/category accuracy.
+// Returns the exact same top-level JSON schema as buildMetadataPrompt so the
+// existing parseMetadata/normalize/validation path is reused unchanged.
+export function buildMetadataPromptFast(args: {
+  settings: GenerationSettings;
+  bgRules: string;
+  platform: "adobe" | "shutterstock" | "magnific";
+}): string {
+  const { settings, bgRules, platform } = args;
+  const rules = rulesFor(platform);
+
+  const keywordTarget =
+    platform === "adobe"
+      ? resolveLimits(settings).adobe.keywordCount
+      : platform === "shutterstock"
+        ? resolveLimits(settings).shutterstock.keywordCount
+        : resolveLimits(settings).magnific.keywordCount;
+
+  const sectionSpecific = (mp: "adobe" | "shutterstock" | "magnific"): string => {
+    const r = rulesFor(mp);
+    let category = "";
+    if (mp === "adobe") {
+      category = interpolate(r.categoryGuidance, {
+        ADOBE_CATEGORIES: ADOBE_CATEGORY_GUIDE,
+      });
+    } else if (mp === "shutterstock") {
+      category = interpolate(r.categoryGuidance, {
+        SHUTTERSTOCK_CATEGORIES: SHUTTERSTOCK_CATEGORY_GUIDE,
+      });
+    } else {
+      category = r.categoryGuidance;
+    }
+    const title = interpolate(r.titleGuidance, {
+      titleMax: String(r.titleMax),
+    });
+    const description =
+      mp === "shutterstock"
+        ? interpolate(r.descriptionGuidance, {
+            descriptionMax: String(r.descriptionMax),
+          })
+        : r.descriptionGuidance;
+    return [
+      `### ${r.label}`,
+      title,
+      description,
+      `- ${r.keywordGuidance}`,
+      `- Category: ${category}`,
+    ].join("\n");
+  };
+
+  return `Analyze the actual image carefully and return the requested metadata. Prioritize accuracy, relevance and strict formatting. Do not provide explanations or reasoning. Return only the required structured output.
+
+${FILENAME_INSTRUCTION}
+
+VERIFIED BACKGROUND FACTS (from pixel analysis — keep strictly consistent):
+${bgRules}
+
+TARGET MARKETPLACE: ${rules.label}
+Generate metadata for ALL THREE marketplaces, but the ${rules.label} section is the primary target and must be optimized with the highest accuracy and searchability.
+
+${sectionSpecific("adobe")}
+
+${sectionSpecific("shutterstock")}
+
+${sectionSpecific("magnific")}
+
+RULES (strict):
+TITLE: accurate, natural, never a keyword list, respect each marketplace's character limit, always end on a complete word. No filler ("professional", "high quality", "premium", "beautiful", "stunning"), no brands, logos, trademarks, camera info, model numbers, or artist names.
+
+KEYWORDS: each keyword is ONE word or a natural TWO-word phrase (never more), STRONGLY prefer single words. Put the strongest, most searchable high-intent terms first. Every keyword MUST be visually supported by the image pixels — never from the filename. No duplicates/near-duplicates, no truncated words, UUIDs, SEO filler, or weak generic terms. Do not pad to hit the count. For ${rules.label}: exactly ${keywordTarget} keywords. For the OTHER marketplaces, use the counts in their sections above.
+
+${settings.enablePrefix && settings.prefix.trim() ? `Prefix every title with: "${settings.prefix.trim()}"` : ""}
+${settings.enableSuffix && settings.suffix.trim() ? `Suffix every title with: "${settings.suffix.trim()}"` : ""}
+${settings.enableNegativeTitleWords && settings.negativeTitleWords.trim() ? `Never use in titles: ${settings.negativeTitleWords.trim()}` : ""}
+${settings.enableNegativeKeywords && settings.negativeKeywords.trim() ? `Never use as keywords: ${settings.negativeKeywords.trim()}` : ""}
+${buildSettingsPrompt(settings)}
+
+MAGNIFIC: write a brief, descriptive "prompt" that could recreate the image with an AI image generator; "model" is "AI Generated" or the specific model if known; always include '_ai_generated' in magnific.keywords for AI-generated content. magnific.category is empty.
+
+CATEGORY: adobe.category is a single numeric ID (1-21) best matching the actual asset. shutterstock.category is 1-2 exact official category names. magnific.category is empty.
+
+EDITORIAL: status is "STANDARD" unless the image genuinely depicts recognisable branded products/signage or trademarked locations used in a news/cultural-commentary context, in which case use "POTENTIAL_EDITORIAL"; use "REVIEW_REQUIRED" only when ambiguous. confidence is an integer 0-100. signals is a subset of ["brand-product","news-context","cultural-commentary","trademarked-location","editorial-concept"]. reason is ONE short sentence.
+
+CONTENT RISK: riskLevel is "LOW" | "REVIEW" | "HIGH" | "VERY_HIGH" based ONLY on the image and the metadata above. issues is an array (max 5) of {"category":"IP or QUALITY or METADATA or AI or VECTOR or SIMILARITY or EDITORIAL or RELEASE","severity":"LOW or MEDIUM or HIGH","reason":"short evidence-based sentence"}. Only flag risks actually visible. recommendation is one short sentence. confidence is an integer 0-100. Never based on the filename; never promise acceptance or rejection.
+
+CONSISTENCY: title, description, and keywords must all describe the SAME image; every major concept in the title must be reflected in the keywords.
+
+Return ONLY this JSON (no markdown, no comments):
+{"adobe":{"title":"","description":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":"","category":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""},"contentCheck":{"riskLevel":"LOW or REVIEW or HIGH or VERY_HIGH","confidence":0,"issues":[],"recommendation":""}}`;
+}
+
 export function buildRefinePrompt(args: {
   settings: GenerationSettings;
   bgRules: string;

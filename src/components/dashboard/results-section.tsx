@@ -2,14 +2,28 @@
 
 import { useEffect, useMemo, useRef } from "react"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
-import { Sparkles } from "lucide-react"
+import { ListChecks, Sparkles } from "lucide-react"
 
-import type { GenerationResult } from "@/lib/types"
+import type { GenerationResult, RiskLevel } from "@/lib/types"
 import { ImageCard } from "@/components/dashboard/image-card"
 import { PendingImageCard } from "@/components/dashboard/pending-image-card"
 import { useAppStore } from "@/store/use-app-store"
+import {
+  CONTENT_RISK_META,
+  normalizeContentCheck,
+  resolveContentCheck,
+} from "@/lib/content-check"
+import { cn } from "@/lib/utils"
 
 const VIRTUALIZE_THRESHOLD = 20;
+
+const RISK_FILTERS: (RiskLevel | "ALL")[] = [
+  "ALL",
+  "LOW",
+  "REVIEW",
+  "HIGH",
+  "VERY_HIGH",
+];
 
 export function ResultsSection() {
   const images = useAppStore((state) => state.images);
@@ -17,6 +31,10 @@ export function ResultsSection() {
   const queueItems = useAppStore((state) => state.queueItems);
   const activeImageId = useAppStore((state) => state.activeImageId);
   const autoScroll = useAppStore((state) => state.autoScroll);
+  const scannedImageIds = useAppStore((state) => state.scannedImageIds);
+  const scanIssues = useAppStore((state) => state.scanIssues);
+  const riskFilter = useAppStore((state) => state.riskFilter);
+  const setRiskFilter = useAppStore((state) => state.setRiskFilter);
   const prevActiveRef = useRef<string | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
@@ -68,6 +86,35 @@ export function ResultsSection() {
 
   const pendingCount = cards.filter((card) => card.kind === "pending").length;
 
+  const riskByImageId = useMemo(() => {
+    const map = new Map<string, RiskLevel>();
+    for (const result of results) {
+      if (!scannedImageIds.includes(result.imageId)) continue;
+      const check = resolveContentCheck(
+        normalizeContentCheck(result.metadata.contentCheck),
+        scanIssues[result.imageId] ?? []
+      );
+      map.set(result.imageId, check.riskLevel);
+    }
+    return map;
+  }, [results, scannedImageIds, scanIssues]);
+
+  const anyScannedResult = useMemo(
+    () =>
+      cards.some(
+        (card) => card.kind === "result" && riskByImageId.has(card.result.imageId)
+      ),
+    [cards, riskByImageId]
+  );
+
+  const filteredCards = useMemo(() => {
+    if (riskFilter === "ALL") return cards;
+    return cards.filter((card) => {
+      if (card.kind !== "result") return true;
+      return riskByImageId.get(card.result.imageId) === riskFilter;
+    });
+  }, [cards, riskFilter, riskByImageId]);
+
   useEffect(() => {
     if (
       !activeImageId ||
@@ -117,15 +164,48 @@ export function ResultsSection() {
 
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">
           {pendingCount > 0 ? "Queue" : "Results"}{" "}
-          <span className="text-muted-foreground">({cards.length})</span>
+          <span className="text-muted-foreground">({filteredCards.length})</span>
         </h2>
+        {anyScannedResult ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <ListChecks className="mr-0.5 size-3.5 text-muted-foreground" />
+            {RISK_FILTERS.map((filter) => (
+              <button
+                key={filter}
+                type="button"
+                onClick={() => setRiskFilter(filter)}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  riskFilter === filter
+                    ? "bg-foreground text-background"
+                    : "bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {filter === "ALL"
+                  ? "All"
+                  : CONTENT_RISK_META[filter].label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
-      {cards.length <= VIRTUALIZE_THRESHOLD ? (
+      {filteredCards.length === 0 && cards.length > 0 ? (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-[20px] border border-dashed bg-card/60 px-6 py-8 text-center">
+          <p className="text-sm font-semibold">No results match this filter</p>
+          <button
+            type="button"
+            onClick={() => setRiskFilter("ALL")}
+            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Show all results
+          </button>
+        </div>
+      ) : filteredCards.length <= VIRTUALIZE_THRESHOLD ? (
         <div className="flex flex-col">
-          {cards.map((card) => (
+          {filteredCards.map((card) => (
             <div
               key={card.kind === "result" ? card.result.id : card.image.id}
             >
@@ -137,7 +217,7 @@ export function ResultsSection() {
         <Virtuoso
           ref={virtuosoRef}
           useWindowScroll
-          data={cards}
+          data={filteredCards}
           itemContent={(_, card) => renderItem(card)}
         />
       )}

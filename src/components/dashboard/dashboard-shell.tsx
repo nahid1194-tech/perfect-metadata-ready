@@ -10,6 +10,7 @@ import { ExportSection } from "@/components/dashboard/export-section"
 import { ImageUpload } from "@/components/dashboard/image-upload"
 import { MetadataSettings } from "@/components/dashboard/metadata-settings"
 import { ResultsSection } from "@/components/dashboard/results-section"
+import { ContentCheckPanel } from "@/components/dashboard/content-check-panel"
 import { UploadToolbar } from "@/components/dashboard/upload-toolbar"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,6 +25,30 @@ export function DashboardShell() {
   const setPlatform = useAppStore((state) => state.setSettings);
   const { run, pause, resume, stop, generating, queueState } = useGenerate();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const images = useAppStore((state) => state.images);
+  const results = useAppStore((state) => state.results);
+  const setActiveImageId = useAppStore((state) => state.setActiveImageId);
+  const setRiskFilter = useAppStore((state) => state.setRiskFilter);
+
+  const handleFocusImage = (imageId: string) => {
+    if (imageId) {
+      setRiskFilter("ALL");
+      setActiveImageId(imageId);
+      return;
+    }
+    const state = useAppStore.getState();
+    const firstFlagged = state.results.find(
+      (result) =>
+        state.scannedImageIds.includes(result.imageId) &&
+        (result.metadata.contentCheck.issues.length > 0 ||
+          (state.scanIssues[result.imageId]?.length ?? 0) > 0)
+    );
+    if (firstFlagged) {
+      setRiskFilter("ALL");
+      setActiveImageId(firstFlagged.imageId);
+    }
+  };
 
   useEffect(() => {
     void ensureModelCache();
@@ -126,6 +151,12 @@ export function DashboardShell() {
           </Card>
 
           <UploadToolbar />
+
+          <ContentCheckPanel
+            images={images}
+            results={results}
+            onFocusImage={handleFocusImage}
+          />
 
           <ResultsSection />
         </main>

@@ -5,9 +5,12 @@ import { revokeAssetUrls } from "@/lib/object-url";
 import { createWorkerSafeStorage } from "@/lib/worker-storage";
 import { FALLBACK_MODELS } from "@/lib/model-catalog";
 import { normalizeEditorialAssessment } from "@/lib/editorial";
+import { normalizeContentCheck } from "@/lib/content-check";
 import type {
   ApiKeyEntry,
   ApiProvider,
+  ContentCheck,
+  ContentIssue,
   DebugStatus,
   GenerationResult,
   GenerationSettings,
@@ -16,6 +19,7 @@ import type {
   ImageAsset,
   QueueItem,
   QueueState,
+  RiskLevel,
   WorkerSnapshot,
 } from "@/lib/types";
 
@@ -72,6 +76,11 @@ type AppState = {
   successOpen: boolean;
   errorOpen: boolean;
   failedImageIds: string[];
+  riskFilter: RiskLevel | "ALL";
+  scannedImageIds: string[];
+  scanEstimates: Record<string, ContentCheck>;
+  scanIssues: Record<string, ContentIssue[]>;
+  scanSizeLabel: string;
   settings: GenerationSettings;
   setTheme: (theme: Theme) => void;
   setApiKeys: (keys: ApiKeyEntry[]) => void;
@@ -111,6 +120,14 @@ type AppState = {
   openError: () => void;
   closeError: () => void;
   setFailedImageIds: (ids: string[]) => void;
+  setRiskFilter: (filter: RiskLevel | "ALL") => void;
+  recordScanResults: (results: {
+    scannedImageIds: string[];
+    estimates: Record<string, ContentCheck>;
+    issues: Record<string, ContentIssue[]>;
+    sizeLabel: string;
+  }) => void;
+  clearScan: () => void;
   addResult: (result: GenerationResult) => void;
   updateResult: (id: string, updater: (result: GenerationResult) => GenerationResult) => void;
   removeResult: (id: string) => void;
@@ -156,6 +173,11 @@ export const useAppStore = create<AppState>()(
       successOpen: false,
       errorOpen: false,
       failedImageIds: [],
+      riskFilter: "ALL",
+      scannedImageIds: [],
+      scanEstimates: {},
+      scanIssues: {},
+      scanSizeLabel: "",
       settings: DEFAULT_SETTINGS,
       gitConfig: DEFAULT_GIT_CONFIG,
       gitPushStatus: DEFAULT_GIT_PUSH_STATUS,
@@ -214,7 +236,17 @@ export const useAppStore = create<AppState>()(
       clearImages: () =>
         set((state) => {
           for (const image of state.images) revokeAssetUrls(image);
-          return { images: [], selectedIds: [], queueItems: {}, queueState: "idle" };
+          return {
+            images: [],
+            selectedIds: [],
+            queueItems: {},
+            queueState: "idle",
+            riskFilter: "ALL",
+            scannedImageIds: [],
+            scanEstimates: {},
+            scanIssues: {},
+            scanSizeLabel: "",
+          };
         }),
       toggleSelected: (id) =>
         set((state) => ({
@@ -269,6 +301,22 @@ export const useAppStore = create<AppState>()(
       openError: () => set({ errorOpen: true }),
       closeError: () => set({ errorOpen: false }),
       setFailedImageIds: (failedImageIds) => set({ failedImageIds }),
+      setRiskFilter: (riskFilter) => set({ riskFilter }),
+      recordScanResults: (results) =>
+        set({
+          scannedImageIds: results.scannedImageIds,
+          scanEstimates: results.estimates,
+          scanIssues: results.issues,
+          scanSizeLabel: results.sizeLabel,
+        }),
+      clearScan: () =>
+        set({
+          riskFilter: "ALL",
+          scannedImageIds: [],
+          scanEstimates: {},
+          scanIssues: {},
+          scanSizeLabel: "",
+        }),
       addResult: (result) => set((state) => ({ results: [result, ...state.results] })),
       updateResult: (id, updater) =>
         set((state) => ({
@@ -305,6 +353,11 @@ export const useAppStore = create<AppState>()(
             errorOpen: false,
             failedImageIds: [],
             resultCache: {},
+            riskFilter: "ALL",
+            scannedImageIds: [],
+            scanEstimates: {},
+            scanIssues: {},
+            scanSizeLabel: "",
           };
         }),
       resultCache: {},
@@ -384,6 +437,11 @@ export const useAppStore = create<AppState>()(
         autoScroll: state.autoScroll,
         gitConfig: state.gitConfig,
         keyHealthCheckedAt: state.keyHealthCheckedAt,
+        riskFilter: state.riskFilter,
+        scannedImageIds: state.scannedImageIds,
+        scanEstimates: state.scanEstimates,
+        scanIssues: state.scanIssues,
+        scanSizeLabel: state.scanSizeLabel,
       }),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as (Partial<AppState> & {
@@ -474,6 +532,9 @@ export const useAppStore = create<AppState>()(
                   editorialAssessment: normalizeEditorialAssessment(
                     result.metadata.editorialAssessment
                   ),
+                  contentCheck: normalizeContentCheck(
+                    result.metadata.contentCheck
+                  ),
                 }
               : result.metadata,
           }));
@@ -495,6 +556,26 @@ export const useAppStore = create<AppState>()(
         }
         if (typeof merged.keyHealthCheckedAt !== "number") {
           merged.keyHealthCheckedAt = null;
+        }
+        if (
+          merged.riskFilter !== "LOW" &&
+          merged.riskFilter !== "REVIEW" &&
+          merged.riskFilter !== "HIGH" &&
+          merged.riskFilter !== "VERY_HIGH"
+        ) {
+          merged.riskFilter = "ALL";
+        }
+        if (!Array.isArray(merged.scannedImageIds)) {
+          merged.scannedImageIds = [];
+        }
+        if (!merged.scanEstimates || typeof merged.scanEstimates !== "object") {
+          merged.scanEstimates = {};
+        }
+        if (!merged.scanIssues || typeof merged.scanIssues !== "object") {
+          merged.scanIssues = {};
+        }
+        if (typeof merged.scanSizeLabel !== "string") {
+          merged.scanSizeLabel = "";
         }
         return merged;
       },

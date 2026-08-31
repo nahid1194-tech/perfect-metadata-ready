@@ -273,6 +273,37 @@ Classify the image as a RECOMMENDATION for Adobe Stock "Illustrative Editorial" 
 - "reason" is ONE short sentence explaining the classification.
 - This classification is a recommendation only and must NEVER leak into the title, keywords, description, or category (do not add words like "editorial", "news", "current events", or "journalism" unless the image genuinely depicts those concepts).
 
+=== CONTENT RISK CHECK (extra analysis field — does NOT affect title, keywords, description, or category) ===
+You are also acting as an AI-assisted PRE-SUBMISSION RISK CHECKER for Adobe Stock based on Adobe's official rejection guidelines. This is advisory only — NEVER claim Adobe will definitely accept or reject the asset.
+
+RISK LEVELS (exactly one):
+- LOW: no meaningful potential rejection risks found.
+- REVIEW: a possible concern, or you are UNSURE. When uncertain, use REVIEW instead of HIGH or VERY_HIGH.
+- HIGH: one clear potential risk (e.g. a visible trademark/logo, an obvious quality defect).
+- VERY_HIGH: multiple strong risks or one severe issue (e.g. a distinctive branded product as the main subject in a commercial context, obvious AI artifacts, real-person depictions).
+
+CHECK THESE AREAS — only flag risks actually supported by the image pixels and the metadata above, NEVER by the filename:
+1. NON-COMPLIANCE: generative-AI labeling requirement, artist-name references, real known people, fictional characters, problematic place/property references, implication of an actual newsworthy event, government agency names, third-party IP references, watermarks, inappropriate titles, irrelevant keywords, questionable or defamatory content. Do NOT flag ordinary text or generic objects automatically.
+2. INTELLECTUAL PROPERTY: logos, trademarks, company/brand names, distinctive packaging, recognizable branded products, copyrighted artwork, sculptures, street art, drawings/illustrations, protected graphic elements, distinctive architecture, restricted or ticketed locations. If any is detected use: "Potential IP issue — manual review recommended." Never make a legal determination.
+3. IMAGE QUALITY: only issues actually visible — blur, lack of sharpness, excessive noise, compression artifacts, AI artifacts, malformed objects, unnatural anatomy, broken geometry, inconsistent lighting/shadows, excessive sharpening, overprocessing, over/underexposure, poor white balance, excessive saturation, chromatic aberration, poor selections, distracting composition problems.
+4. GENERATIVE AI QUALITY: for AI-generated content — malformed anatomy, extra/missing limbs, duplicated objects, impossible geometry, distorted text, broken architecture, inconsistent reflections/shadows, strange object relationships, obvious generation artifacts. Also flag problematic metadata references for AI content (artist names, real people, fictional characters, places, brands). Never advise on hiding or bypassing generative-AI disclosure.
+5. VECTOR / EPS: the rendered preview only shows the pixels — you cannot verify vector structure from it. Only note visible issues (e.g. the artwork appears to be autotraced photographic/raster content or obviously unusable). Never claim the vector file structure is correct or incorrect from the raster preview.
+6. COMMERCIAL / AESTHETIC APPEAL: subject clarity, composition, professional appearance, visual quality, uniqueness, usefulness for designers/buyers. Use "Possible low commercial appeal" phrasing; do NOT automatically flag common subjects.
+7. EDITORIAL / NEWS RISK: reflect the editorialAssessment above. If content appears to imply an actual newsworthy event or editorial/commentary context, add an EDITORIAL-category issue at REVIEW level — do NOT classify it as rejected.
+8. RELEASE / PROPERTY REVIEW: if visually detectable — recognizable people, recognizable private property, artworks, distinctive locations, restricted venues. Use "Release/property review may be required." Do not claim a release is definitely required unless the relevant Adobe rule clearly supports that conclusion.
+9. METADATA CHECK: compare the generated title and keywords above against the actual image. Look for irrelevant or misleading keywords, keyword stuffing, duplicate keywords, trademark/brand references, artist names, real-person names, fictional characters, problematic locations, news-event references, title/image or keyword/image mismatch. The filename MUST NOT be used as the semantic source.
+
+FALSE-POSITIVE CONTROL: do NOT flag an asset simply because it contains ordinary text, generic objects, common colors, normal buildings, normal people, or generic concepts. Only flag meaningful potential risks supported by the actual image; when in doubt → REVIEW, not HIGH/VERY_HIGH.
+
+OUTPUT (one extra JSON field, exactly this shape):
+"contentCheck":{
+  "riskLevel":"LOW or REVIEW or HIGH or VERY_HIGH",
+  "confidence":0,
+  "issues":[{"category":"IP or QUALITY or METADATA or AI or VECTOR or SIMILARITY or EDITORIAL or RELEASE","severity":"LOW or MEDIUM or HIGH","reason":"Short user-facing explanation"}],
+  "recommendation":"Short recommendation"
+}
+Rules: riskLevel and issues must never be based on the filename; confidence is an integer 0-100; each reason is a concise, evidence-based sentence (no chain-of-thought); list AT MOST the 5 most important issues; do NOT produce SIMILARITY-category issues (those are computed separately); never promise acceptance or rejection.
+
 CONSISTENCY:
 - The title, description, and keywords must all describe the SAME image. Every major concept in the title must be reflected in the keywords.
 
@@ -280,7 +311,7 @@ USER PREFERENCES:
 ${buildSettingsPrompt(settings)}
 
 Return ONLY this JSON (no markdown, no comments):
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""}}`;
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""},"contentCheck":{"riskLevel":"LOW or REVIEW or HIGH or VERY_HIGH","confidence":0,"issues":[{"category":"IP or QUALITY or METADATA or AI or VECTOR or SIMILARITY or EDITORIAL or RELEASE","severity":"LOW or MEDIUM or HIGH","reason":"Short user-facing explanation"}],"recommendation":"Short recommendation"}}`;
 }
 
 export function buildRefinePrompt(args: {
@@ -326,6 +357,6 @@ Rules to enforce:
 - The title must be accurate, natural, within the character limit, end on a complete word, and never be a keyword list or contain filler/brands/camera info.
 - Only use terms supported by the visual analysis.
 - Fix ONLY the failing components; do not change unrelated content.
-- Return the COMPLETE JSON for ALL marketplaces, with ${platform} fixed and the others unchanged. Keep "editorialAssessment" exactly as it was:
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""}}`;
+- Return the COMPLETE JSON for ALL marketplaces, with ${platform} fixed and the others unchanged. Keep "editorialAssessment" and "contentCheck" exactly as they were:
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""},"contentCheck":{"riskLevel":"LOW or REVIEW or HIGH or VERY_HIGH","confidence":0,"issues":[{"category":"IP or QUALITY or METADATA or AI or VECTOR or SIMILARITY or EDITORIAL or RELEASE","severity":"LOW or MEDIUM or HIGH","reason":"Short user-facing explanation"}],"recommendation":"Short recommendation"}}`;
 }

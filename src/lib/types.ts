@@ -67,11 +67,39 @@ export type EditorialAssessment = {
   reason: string;
 };
 
+export type RiskLevel = "LOW" | "REVIEW" | "HIGH" | "VERY_HIGH";
+
+export type ContentIssueCategory =
+  | "IP"
+  | "QUALITY"
+  | "METADATA"
+  | "AI"
+  | "VECTOR"
+  | "SIMILARITY"
+  | "EDITORIAL"
+  | "RELEASE";
+
+export type ContentIssueSeverity = "LOW" | "MEDIUM" | "HIGH";
+
+export type ContentIssue = {
+  category: ContentIssueCategory;
+  severity: ContentIssueSeverity;
+  reason: string;
+};
+
+export type ContentCheck = {
+  riskLevel: RiskLevel;
+  confidence: number;
+  issues: ContentIssue[];
+  recommendation: string;
+};
+
 export type GeneratedMetadata = {
   adobe: StockMetadata;
   shutterstock: StockMetadata;
   magnific: MagnificMetadata;
   editorialAssessment: EditorialAssessment;
+  contentCheck: ContentCheck;
 };
 
 export type GenerationResult = {

@@ -14,7 +14,12 @@ import {
 import { EPS_MAX_FILE_SIZE_MB } from "@/lib/image-process"
 import { logProfile } from "@/lib/perf"
 import { EDITORIAL_STATUS_META, normalizeEditorialAssessment } from "@/lib/editorial"
-import type { EditorialAssessment } from "@/lib/types"
+import {
+  CONTENT_RISK_META,
+  normalizeContentCheck,
+  resolveContentCheck,
+} from "@/lib/content-check"
+import type { ContentCheck, EditorialAssessment } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { useAppStore } from "@/store/use-app-store"
@@ -53,6 +58,24 @@ export function ImageUpload() {
     }
     return map;
   }, [results]);
+
+  const scannedImageIds = useAppStore((state) => state.scannedImageIds);
+  const scanIssues = useAppStore((state) => state.scanIssues);
+  const scanEstimates = useAppStore((state) => state.scanEstimates);
+
+  const contentCheckByImageId = useMemo(() => {
+    const map = new Map<string, ContentCheck>();
+    for (const result of results) {
+      map.set(
+        result.imageId,
+        normalizeContentCheck(result.metadata?.contentCheck)
+      );
+    }
+    for (const [imageId, estimate] of Object.entries(scanEstimates)) {
+      if (!map.has(imageId)) map.set(imageId, estimate);
+    }
+    return map;
+  }, [results, scanEstimates]);
 
   useEffect(() => {
     if (generating) setGalleryHidden(true);
@@ -285,6 +308,14 @@ export function ImageUpload() {
                 const editorialMeta = editorial
                   ? EDITORIAL_STATUS_META[editorial.status]
                   : null;
+                const scanned = scannedImageIds.includes(image.id);
+                const rawCheck = contentCheckByImageId.get(image.id);
+                const riskCheck = scanned && rawCheck
+                  ? resolveContentCheck(rawCheck, scanIssues[image.id] ?? [])
+                  : null;
+                const riskMeta = riskCheck
+                  ? CONTENT_RISK_META[riskCheck.riskLevel]
+                  : null;
                 return (
                   <motion.div
                     key={image.id}
@@ -356,6 +387,18 @@ export function ImageUpload() {
                       >
                         <span className={cn("size-1.5 rounded-full", editorialMeta.dotClassName)} />
                         {editorialMeta.shortLabel}
+                      </span>
+                    ) : null}
+                    {riskMeta ? (
+                      <span
+                        title={`${riskMeta.label} — Content Check`}
+                        className={cn(
+                          "absolute bottom-1.5 right-1.5 z-10 flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur",
+                          riskMeta.badgeClassName
+                        )}
+                      >
+                        <span className={cn("size-1.5 rounded-full", riskMeta.dotClassName)} />
+                        {riskMeta.shortLabel}
                       </span>
                     ) : null}
                     <div className="mt-1 px-0.5">

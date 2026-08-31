@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react"
 import { motion } from "framer-motion"
-import { ChevronDown, FileImage, Loader2, Maximize2, RefreshCw, Trash2 } from "lucide-react"
+import { ChevronDown, FileImage, Loader2, Maximize2, RefreshCw, ShieldAlert, Trash2 } from "lucide-react"
 
 import type { EditorialStatus, GenerationResult } from "@/lib/types"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
@@ -12,6 +12,14 @@ import {
   applyEditorialOverride,
   normalizeEditorialAssessment,
 } from "@/lib/editorial"
+import {
+  CATEGORY_LABELS,
+  CONTENT_CHECK_DISCLAIMER,
+  CONTENT_RISK_META,
+  normalizeContentCheck,
+  resolveContentCheck,
+  SEVERITY_META,
+} from "@/lib/content-check"
 import {
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
@@ -56,6 +64,7 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const [previewOpen, setPreviewOpen] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
   const [editorialOpen, setEditorialOpen] = useState(false);
+  const [issuesOpen, setIssuesOpen] = useState(false);
 
   const format = marketplaceFormat(platform);
   const isMagnific = format === "magnific";
@@ -66,6 +75,15 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
 
   const editorial = normalizeEditorialAssessment(result.metadata.editorialAssessment);
   const editorialMeta = EDITORIAL_STATUS_META[editorial.status];
+
+  const scannedImageIds = useAppStore((state) => state.scannedImageIds);
+  const scanIssues = useAppStore((state) => state.scanIssues);
+  const scanned = scannedImageIds.includes(result.imageId);
+  const contentCheck = normalizeContentCheck(result.metadata.contentCheck);
+  const resolvedCheck = scanned
+    ? resolveContentCheck(contentCheck, scanIssues[result.imageId] ?? [])
+    : null;
+  const riskMeta = resolvedCheck ? CONTENT_RISK_META[resolvedCheck.riskLevel] : null;
 
   const setEditorialStatus = (status: EditorialStatus) =>
     updateResult(result.id, (current) => ({
@@ -131,7 +149,8 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
         transition={{ type: "spring", stiffness: 260, damping: 26 }}
         className={cn(
           "rounded-[20px] border bg-card p-4 shadow-sm sm:p-5",
-          editorialMeta.cardBorderClassName
+          editorialMeta.cardBorderClassName,
+          riskMeta?.cardBorderClassName
         )}
       >
       <div className="flex flex-col gap-4">
@@ -186,6 +205,15 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
             <span className={cn("size-2 rounded-full", editorialMeta.dotClassName)} />
             {editorialMeta.label}
           </Badge>
+          {resolvedCheck && riskMeta ? (
+            <Badge
+              variant="secondary"
+              className={cn("shrink-0 gap-1.5 text-xs font-semibold", riskMeta.badgeClassName)}
+            >
+              <span className={cn("size-2 rounded-full", riskMeta.dotClassName)} />
+              {riskMeta.label}
+            </Badge>
+          ) : null}
           {result.qualityScore != null ? (
             <Badge
               variant="secondary"
@@ -304,14 +332,65 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
         </div>
 
         <div className="border-t pt-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEditorialOpen((open) => !open)}
-          >
-            <ChevronDown className={cn("size-3 transition-transform", editorialOpen && "rotate-180")} />
-            Editorial Details
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditorialOpen((open) => !open)}
+            >
+              <ChevronDown className={cn("size-3 transition-transform", editorialOpen && "rotate-180")} />
+              Editorial Details
+            </Button>
+            {resolvedCheck && resolvedCheck.issues.length > 0 ? (
+              <Button
+                variant={issuesOpen ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIssuesOpen((open) => !open)}
+              >
+                <ShieldAlert className={cn("size-3", resolvedCheck.riskLevel !== "LOW" && "text-orange-500")} />
+                View Issues
+                <span className="ml-0.5 rounded-full bg-background/80 px-1.5 text-[10px] font-semibold">
+                  {resolvedCheck.issues.length}
+                </span>
+              </Button>
+            ) : null}
+          </div>
+
+          {issuesOpen && resolvedCheck ? (
+            <div className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide",
+                    riskMeta?.badgeClassName
+                  )}
+                >
+                  <span className={cn("size-2 rounded-full", riskMeta?.dotClassName)} />
+                  {riskMeta?.label}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  AI confidence: {resolvedCheck.confidence}/100
+                </span>
+              </div>
+              {resolvedCheck.recommendation ? (
+                <p className="text-sm">{resolvedCheck.recommendation}</p>
+              ) : null}
+              <div className="space-y-1.5">
+                {resolvedCheck.issues.map((issue, index) => (
+                  <div key={`${issue.category}-${index}`} className="flex items-start gap-2 text-xs">
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
+                      {CATEGORY_LABELS[issue.category]}
+                    </span>
+                    <span className={cn("shrink-0 font-semibold", SEVERITY_META[issue.severity].className)}>
+                      {SEVERITY_META[issue.severity].label}
+                    </span>
+                    <span className="text-muted-foreground">{issue.reason}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">{CONTENT_CHECK_DISCLAIMER}</p>
+            </div>
+          ) : null}
 
           {editorialOpen ? (
             <div className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3">

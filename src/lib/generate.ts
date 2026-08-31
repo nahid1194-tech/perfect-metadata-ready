@@ -52,6 +52,10 @@ import {
   DEFAULT_EDITORIAL_ASSESSMENT,
   normalizeEditorialAssessment,
 } from "@/lib/editorial";
+import {
+  DEFAULT_CONTENT_CHECK,
+  normalizeContentCheck,
+} from "@/lib/content-check";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -646,6 +650,7 @@ function applySettings(
       ),
     },
     editorialAssessment: metadata.editorialAssessment,
+    contentCheck: metadata.contentCheck,
   };
 }
 
@@ -655,6 +660,7 @@ export function buildNeutralMetadata(): GeneratedMetadata {
     shutterstock: { title: "", description: "", keywords: [], category: "" },
     magnific: { title: "", keywords: [], prompt: "", model: "" },
     editorialAssessment: DEFAULT_EDITORIAL_ASSESSMENT,
+    contentCheck: DEFAULT_CONTENT_CHECK,
   };
 }
 
@@ -906,6 +912,7 @@ function parseMetadata(text: string): {
   shutterstock?: unknown;
   magnific?: unknown;
   editorialAssessment?: unknown;
+  contentCheck?: unknown;
 } | null {
   try {
     const json = JSON.parse(extractJson(text)) as {
@@ -913,6 +920,7 @@ function parseMetadata(text: string): {
       shutterstock?: unknown;
       magnific?: unknown;
       editorialAssessment?: unknown;
+      contentCheck?: unknown;
     } | null;
     return json && typeof json === "object" ? json : null;
   } catch {
@@ -930,6 +938,7 @@ function mergeRefinedMetadata(
     shutterstock?: unknown;
     magnific?: unknown;
     editorialAssessment?: unknown;
+    contentCheck?: unknown;
   } | null
 ): GeneratedMetadata {
   if (!refined) return current;
@@ -942,6 +951,7 @@ function mergeRefinedMetadata(
     ),
     magnific: normalizeMagnific(refined.magnific, current.magnific),
     editorialAssessment: current.editorialAssessment,
+    contentCheck: current.contentCheck,
   };
 }
 
@@ -1090,6 +1100,10 @@ async function runGenerationPipeline(args: {
       editorialAssessment: normalizeEditorialAssessment(
         parsed.editorialAssessment,
         fallback.editorialAssessment
+      ),
+      contentCheck: normalizeContentCheck(
+        parsed.contentCheck,
+        fallback.contentCheck
       ),
     };
     profiler.end("metadata");

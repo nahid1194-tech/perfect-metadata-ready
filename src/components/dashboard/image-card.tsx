@@ -4,8 +4,14 @@ import { memo, useState } from "react"
 import { motion } from "framer-motion"
 import { ChevronDown, FileImage, Loader2, Maximize2, RefreshCw, Trash2 } from "lucide-react"
 
-import type { GenerationResult } from "@/lib/types"
+import type { EditorialStatus, GenerationResult } from "@/lib/types"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
+import {
+  EDITORIAL_SIGNAL_LABELS,
+  EDITORIAL_STATUS_META,
+  applyEditorialOverride,
+  normalizeEditorialAssessment,
+} from "@/lib/editorial"
 import {
   ADOBE_KEYWORDS_MAX,
   ADOBE_TITLE_MAX,
@@ -49,6 +55,7 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const [regenerating, setRegenerating] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [timingOpen, setTimingOpen] = useState(false);
+  const [editorialOpen, setEditorialOpen] = useState(false);
 
   const format = marketplaceFormat(platform);
   const isMagnific = format === "magnific";
@@ -56,6 +63,21 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
   const isAdobe = format === "adobe";
   const isShutterstock = format === "shutterstock";
   const keywordMax = isAdobe ? ADOBE_KEYWORDS_MAX : isShutterstock ? SHUTTERSTOCK_KEYWORDS_MAX : MAGNIFIC_KEYWORDS_MAX;
+
+  const editorial = normalizeEditorialAssessment(result.metadata.editorialAssessment);
+  const editorialMeta = EDITORIAL_STATUS_META[editorial.status];
+
+  const setEditorialStatus = (status: EditorialStatus) =>
+    updateResult(result.id, (current) => ({
+      ...current,
+      metadata: {
+        ...current.metadata,
+        editorialAssessment: applyEditorialOverride(
+          current.metadata.editorialAssessment,
+          status
+        ),
+      },
+    }));
 
   const previewable =
     image && (image.type.startsWith("image/") || image.type.startsWith("video/"));
@@ -107,7 +129,10 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -8 }}
         transition={{ type: "spring", stiffness: 260, damping: 26 }}
-        className="rounded-[20px] border bg-card p-4 shadow-sm sm:p-5"
+        className={cn(
+          "rounded-[20px] border bg-card p-4 shadow-sm sm:p-5",
+          editorialMeta.cardBorderClassName
+        )}
       >
       <div className="flex flex-col gap-4">
         <div className="flex items-start gap-3">
@@ -151,6 +176,16 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
           <p className="min-w-0 flex-1 truncate pt-1 text-sm font-medium">
             {result.imageName}
           </p>
+          <Badge
+            variant="secondary"
+            className={cn(
+              "shrink-0 gap-1.5 text-xs font-semibold",
+              editorialMeta.badgeClassName
+            )}
+          >
+            <span className={cn("size-2 rounded-full", editorialMeta.dotClassName)} />
+            {editorialMeta.label}
+          </Badge>
           {result.qualityScore != null ? (
             <Badge
               variant="secondary"
@@ -264,6 +299,78 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
                 value={(metadata as { category?: string }).category ?? ""}
                 onChange={(category) => patch("category", category)}
               />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t pt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setEditorialOpen((open) => !open)}
+          >
+            <ChevronDown className={cn("size-3 transition-transform", editorialOpen && "rotate-180")} />
+            Editorial Details
+          </Button>
+
+          {editorialOpen ? (
+            <div className="mt-2 flex flex-col gap-2 rounded-xl border bg-muted/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={cn(
+                    "flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide",
+                    editorialMeta.badgeClassName
+                  )}
+                >
+                  <span className={cn("size-2 rounded-full", editorialMeta.dotClassName)} />
+                  {editorialMeta.label}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  AI confidence: {editorial.confidence}/100
+                </span>
+              </div>
+              <p className="text-sm">{editorial.reason}</p>
+              {editorial.signals.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {editorial.signals.map((signal) => (
+                    <span
+                      key={signal}
+                      className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+                    >
+                      {EDITORIAL_SIGNAL_LABELS[signal]}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                AI classification is a recommendation. Verify Adobe Stock
+                eligibility before submission.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <Button
+                  size="sm"
+                  variant={
+                    editorial.status === "POTENTIAL_EDITORIAL" ? "default" : "outline"
+                  }
+                  onClick={() => setEditorialStatus("POTENTIAL_EDITORIAL")}
+                >
+                  Mark as Editorial
+                </Button>
+                <Button
+                  size="sm"
+                  variant={editorial.status === "STANDARD" ? "default" : "outline"}
+                  onClick={() => setEditorialStatus("STANDARD")}
+                >
+                  Mark as Standard
+                </Button>
+                <Button
+                  size="sm"
+                  variant={editorial.status === "REVIEW_REQUIRED" ? "default" : "outline"}
+                  onClick={() => setEditorialStatus("REVIEW_REQUIRED")}
+                >
+                  Mark for Review
+                </Button>
+              </div>
             </div>
           ) : null}
         </div>

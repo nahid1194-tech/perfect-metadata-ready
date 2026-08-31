@@ -4,6 +4,7 @@ import { persist } from "zustand/middleware";
 import { revokeAssetUrls } from "@/lib/object-url";
 import { createWorkerSafeStorage } from "@/lib/worker-storage";
 import { FALLBACK_MODELS } from "@/lib/model-catalog";
+import { normalizeEditorialAssessment } from "@/lib/editorial";
 import type {
   ApiKeyEntry,
   ApiProvider,
@@ -467,7 +468,14 @@ export const useAppStore = create<AppState>()(
             imageId: result.imageId,
             createdAt: result.createdAt,
             imageName: result.imageName,
-            metadata: result.metadata,
+            metadata: result.metadata
+              ? {
+                  ...result.metadata,
+                  editorialAssessment: normalizeEditorialAssessment(
+                    result.metadata.editorialAssessment
+                  ),
+                }
+              : result.metadata,
           }));
         }
         if (

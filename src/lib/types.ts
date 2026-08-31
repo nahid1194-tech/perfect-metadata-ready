@@ -48,10 +48,30 @@ export type MagnificMetadata = {
   model: string;
 };
 
+export type EditorialStatus =
+  | "STANDARD"
+  | "POTENTIAL_EDITORIAL"
+  | "REVIEW_REQUIRED";
+
+export type EditorialSignal =
+  | "brand-product"
+  | "news-context"
+  | "cultural-commentary"
+  | "trademarked-location"
+  | "editorial-concept";
+
+export type EditorialAssessment = {
+  status: EditorialStatus;
+  confidence: number;
+  signals: EditorialSignal[];
+  reason: string;
+};
+
 export type GeneratedMetadata = {
   adobe: StockMetadata;
   shutterstock: StockMetadata;
   magnific: MagnificMetadata;
+  editorialAssessment: EditorialAssessment;
 };
 
 export type GenerationResult = {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { FileImage, ImagePlus, Loader2, X } from "lucide-react"
 
@@ -13,6 +13,8 @@ import {
 } from "@/lib/upload-process"
 import { EPS_MAX_FILE_SIZE_MB } from "@/lib/image-process"
 import { logProfile } from "@/lib/perf"
+import { EDITORIAL_STATUS_META, normalizeEditorialAssessment } from "@/lib/editorial"
+import type { EditorialAssessment } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import { useAppStore } from "@/store/use-app-store"
@@ -28,6 +30,7 @@ type UploadItem = {
 
 export function ImageUpload() {
   const images = useAppStore((state) => state.images);
+  const results = useAppStore((state) => state.results);
   const addImages = useAppStore((state) => state.addImages);
   const removeImage = useAppStore((state) => state.removeImage);
   const selectedIds = useAppStore((state) => state.selectedIds);
@@ -39,6 +42,17 @@ export function ImageUpload() {
   const [showAllGallery, setShowAllGallery] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const GALLERY_VISIBLE_LIMIT = 40;
+
+  const editorialByImageId = useMemo(() => {
+    const map = new Map<string, EditorialAssessment>();
+    for (const result of results) {
+      map.set(
+        result.imageId,
+        normalizeEditorialAssessment(result.metadata?.editorialAssessment)
+      );
+    }
+    return map;
+  }, [results]);
 
   useEffect(() => {
     if (generating) setGalleryHidden(true);
@@ -267,6 +281,10 @@ export function ImageUpload() {
               ).map((image) => {
                 const selected = selectedIds.includes(image.id);
                 const previewSrc = image.previewUrl ?? image.apiDataUrl ?? image.dataUrl;
+                const editorial = editorialByImageId.get(image.id);
+                const editorialMeta = editorial
+                  ? EDITORIAL_STATUS_META[editorial.status]
+                  : null;
                 return (
                   <motion.div
                     key={image.id}
@@ -328,6 +346,18 @@ export function ImageUpload() {
                     >
                       <X className="size-3.5" />
                     </button>
+                    {editorialMeta ? (
+                      <span
+                        title={editorialMeta.label}
+                        className={cn(
+                          "absolute bottom-1.5 left-1.5 z-10 flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur",
+                          editorialMeta.badgeClassName
+                        )}
+                      >
+                        <span className={cn("size-1.5 rounded-full", editorialMeta.dotClassName)} />
+                        {editorialMeta.shortLabel}
+                      </span>
+                    ) : null}
                     <div className="mt-1 px-0.5">
                       <p className="truncate text-xs font-medium">{image.name}</p>
                       <p className="text-[11px] text-muted-foreground">

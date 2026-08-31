@@ -259,6 +259,20 @@ CATEGORY:
 - shutterstock.category: 1-2 exact official category names.
 - magnific.category: leave empty (not used in Magnific CSV).
 
+=== EDITORIAL CLASSIFICATION (extra analysis field — does NOT affect title, keywords, description, or category) ===
+Classify the image as a RECOMMENDATION for Adobe Stock "Illustrative Editorial" eligibility. Illustrative Editorial is conceptual imagery designed to illustrate articles on current events or newsworthy topics, often featuring real brands/products (e.g. building signs, soda cans, cars, computers) presented in a NON-COMMERCIAL, commentary, or news context. It is NOT ordinary editorial/documentary photography, which Adobe does not currently accept.
+
+- POTENTIAL_EDITORIAL only when the image genuinely fits illustrative editorial: recognisable real-world brands/products used in news or cultural commentary, editorial cartoons about product launches or industry developments, conceptual imagery featuring brand logos in news/cultural commentary contexts, photos of branded products or signage illustrating current events, or trademarked buildings/locations depicted in an editorial/news context.
+- STANDARD when the image is ordinary commercial stock content, even if a brand/logo appears in a purely commercial, decorative, or product-style context. A brand alone is NOT enough to flag editorial — consider context, purpose, composition, storytelling, news relevance, and commentary.
+- REVIEW_REQUIRED when the context is insufficient or ambiguous. Never force a decision.
+- Disqualifiers from illustrative editorial: recognisable people, restricted events (e.g. conventions, sports games, premieres), tight crops of copyrighted or trademarked material (stamps, fine art), or digitally created/manipulated versions of trademarked logos.
+- Baseline this decision ONLY on the visual content and the VERIFIED BACKGROUND FACTS. Never decide from the filename, its keywords, folder names, or existing metadata — a file named "Apple-news.png" is still just an image and must be judged by its pixels.
+- "status" is one of: "STANDARD", "POTENTIAL_EDITORIAL", "REVIEW_REQUIRED".
+- "confidence" is an integer 0-100.
+- "signals" must be a subset of: "brand-product", "news-context", "cultural-commentary", "trademarked-location", "editorial-concept".
+- "reason" is ONE short sentence explaining the classification.
+- This classification is a recommendation only and must NEVER leak into the title, keywords, description, or category (do not add words like "editorial", "news", "current events", or "journalism" unless the image genuinely depicts those concepts).
+
 CONSISTENCY:
 - The title, description, and keywords must all describe the SAME image. Every major concept in the title must be reflected in the keywords.
 
@@ -266,7 +280,7 @@ USER PREFERENCES:
 ${buildSettingsPrompt(settings)}
 
 Return ONLY this JSON (no markdown, no comments):
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""}}`;
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""}}`;
 }
 
 export function buildRefinePrompt(args: {
@@ -312,6 +326,6 @@ Rules to enforce:
 - The title must be accurate, natural, within the character limit, end on a complete word, and never be a keyword list or contain filler/brands/camera info.
 - Only use terms supported by the visual analysis.
 - Fix ONLY the failing components; do not change unrelated content.
-- Return the COMPLETE JSON for ALL marketplaces, with ${platform} fixed and the others unchanged:
-{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""}}`;
+- Return the COMPLETE JSON for ALL marketplaces, with ${platform} fixed and the others unchanged. Keep "editorialAssessment" exactly as it was:
+{"adobe":{"title":"","keywords":[],"category":""},"shutterstock":{"title":"","description":"","keywords":[],"category":""},"magnific":{"title":"","keywords":[],"prompt":"","model":""},"editorialAssessment":{"status":"STANDARD or POTENTIAL_EDITORIAL or REVIEW_REQUIRED","confidence":0,"signals":[],"reason":""}}`;
 }

@@ -48,6 +48,10 @@ import {
   validateGeneratedMetadata,
   type ValidationReport,
 } from "@/lib/metadata-validator";
+import {
+  DEFAULT_EDITORIAL_ASSESSMENT,
+  normalizeEditorialAssessment,
+} from "@/lib/editorial";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const OPENAI_API_BASE = "https://api.openai.com/v1";
@@ -641,6 +645,7 @@ function applySettings(
         )
       ),
     },
+    editorialAssessment: metadata.editorialAssessment,
   };
 }
 
@@ -649,6 +654,7 @@ export function buildNeutralMetadata(): GeneratedMetadata {
     adobe: { title: "", description: "", keywords: [], category: "" },
     shutterstock: { title: "", description: "", keywords: [], category: "" },
     magnific: { title: "", keywords: [], prompt: "", model: "" },
+    editorialAssessment: DEFAULT_EDITORIAL_ASSESSMENT,
   };
 }
 
@@ -899,12 +905,14 @@ function parseMetadata(text: string): {
   adobe?: unknown;
   shutterstock?: unknown;
   magnific?: unknown;
+  editorialAssessment?: unknown;
 } | null {
   try {
     const json = JSON.parse(extractJson(text)) as {
       adobe?: unknown;
       shutterstock?: unknown;
       magnific?: unknown;
+      editorialAssessment?: unknown;
     } | null;
     return json && typeof json === "object" ? json : null;
   } catch {
@@ -921,6 +929,7 @@ function mergeRefinedMetadata(
     adobe?: unknown;
     shutterstock?: unknown;
     magnific?: unknown;
+    editorialAssessment?: unknown;
   } | null
 ): GeneratedMetadata {
   if (!refined) return current;
@@ -932,6 +941,7 @@ function mergeRefinedMetadata(
       "shutterstock"
     ),
     magnific: normalizeMagnific(refined.magnific, current.magnific),
+    editorialAssessment: current.editorialAssessment,
   };
 }
 
@@ -1077,6 +1087,10 @@ async function runGenerationPipeline(args: {
         "shutterstock"
       ),
       magnific: normalizeMagnific(parsed.magnific, fallback.magnific),
+      editorialAssessment: normalizeEditorialAssessment(
+        parsed.editorialAssessment,
+        fallback.editorialAssessment
+      ),
     };
     profiler.end("metadata");
 
@@ -1189,7 +1203,7 @@ async function callGemini(
           generationConfig: {
             temperature,
             responseMimeType: "application/json",
-            maxOutputTokens: 2048,
+            maxOutputTokens: 4096,
           },
         }),
       }

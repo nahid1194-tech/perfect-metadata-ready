@@ -107,6 +107,7 @@ export async function prepareImageForApi(
     }
   }
 
+  let compressionError: unknown;
   try {
     let compressed: PreparedEntry;
     if (image.blob) {
@@ -128,10 +129,11 @@ export async function prepareImageForApi(
       });
     }
     return compressed;
-  } catch (compressionError) {
+  } catch (error) {
+    compressionError = error;
     console.warn(
       "[Image] Could not compress for the API, attempting final fallback",
-      compressionError
+      error
     );
   }
 
@@ -145,9 +147,13 @@ export async function prepareImageForApi(
       mimeType: image.apiMimeType ?? image.type,
     };
   }
+  const detail =
+    compressionError instanceof Error && compressionError.message
+      ? ` (${compressionError.message})`
+      : "";
   throw new Error(
-    `Unsupported or corrupted image — "${image.name}" could not be read. ` +
-      "The file may be empty, corrupted, or in a format that cannot be processed."
+    `Cannot prepare image — "${image.name}" could not be read. ` +
+      `The file may be empty, corrupted, unsupported, or too large to process in this browser.${detail}`
   );
 }
 
@@ -197,16 +203,37 @@ function closeBitmap(image: BitmapSource): void {
 
 // Decode a Blob into a drawable image. createImageBitmap is preferred (fast,
 // off-main-thread capable); some formats (e.g. SVG) require the img element
-// on the main thread.
-async function loadBitmap(blob: Blob): Promise<BitmapSource> {
+// on the main thread. When a maxDimension is given, decode is capped at that
+// edge so enormous upscaled images never allocate a full-resolution bitmap.
+async function loadBitmap(
+  blob: Blob,
+  maxDimension?: number
+): Promise<BitmapSource> {
   try {
-    const bitmap = await createImageBitmap(blob);
+    const opts: ImageBitmapOptions = {};
+    if (typeof maxDimension === "number" && maxDimension > 0) {
+      opts.resizeWidth = maxDimension;
+      opts.resizeQuality = "high";
+    }
+    const bitmap = await createImageBitmap(blob, opts);
     if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
     closeBitmap(bitmap);
   } catch {
     // Fall through to the img-element loader below.
   }
   if (IS_WORKER) {
+    // Some worker runtimes reject resized decode as well; try the plain decode
+    // once before giving up — it is better to return a decoded source than to
+    // treat a decodable image as corrupt.
+    if (maxDimension !== undefined) {
+      try {
+        const bitmap = await createImageBitmap(blob);
+        if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
+        closeBitmap(bitmap);
+      } catch {
+        // fall through to throw below
+      }
+    }
     throw new Error("This file type cannot be decoded for analysis.");
   }
   return new Promise<HTMLImageElement>((resolve, reject) => {
@@ -250,13 +277,26 @@ function canvasToBlob(
   );
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () =>
-      reject(new Error("Could not encode the compressed image."));
-    reader.readAsDataURL(blob);
+// Convert a Blob to base64 in a way that works in BOTH the main thread and the
+// generation Web Worker, without relying on FileReader. FileReader is flaky for
+// very large Blobs and can hit browser string-size limits; building base64 from
+// bytes in chunks is portable and bounded.
+function readBlobAsBase64(blob: Blob): Promise<string> {
+  return blob.arrayBuffer().then((buffer) => {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  });
+}
+
+function blobToDataUrl(blob: Blob, fallbackMime = "image/jpeg"): Promise<string> {
+  return readBlobAsBase64(blob).then((base64) => {
+    const mime = blob.type || fallbackMime;
+    return `data:${mime};base64,${base64}`;
   });
 }
 
@@ -367,19 +407,30 @@ function encodeFromBitmap(
 }
 
 // Build a small, AI-ready analysis image straight from a Blob — no full-size
-// base64 intermediate is ever produced.
+// base64 intermediate is ever produced. Decodes at native resolution first; if
+// decoding/compressing the full-resolution source fails (e.g. an enormous
+// upscaled image exceeds memory limits), retries once with the decode capped at
+// the target analysis dimension so the file is still analyzable.
 export async function preparedImageFromBlob(
   blob: Blob,
   opts: { maxDimension?: number; targetMaxBytes?: number } = {}
 ): Promise<PreparedEntry> {
-  const image = await loadBitmap(blob);
+  const maxDimension = opts.maxDimension ?? ANALYSIS_MAX_DIMENSION;
+  const targetMaxBytes = opts.targetMaxBytes ?? IMAGE_MAX_BYTES;
   try {
-    return await encodeFromBitmap(image, {
-      maxDimension: opts.maxDimension ?? ANALYSIS_MAX_DIMENSION,
-      targetMaxBytes: opts.targetMaxBytes ?? IMAGE_MAX_BYTES,
-    });
-  } finally {
-    closeBitmap(image);
+    const image = await loadBitmap(blob);
+    try {
+      return await encodeFromBitmap(image, { maxDimension, targetMaxBytes });
+    } finally {
+      closeBitmap(image);
+    }
+  } catch {
+    const capped = await loadBitmap(blob, maxDimension);
+    try {
+      return await encodeFromBitmap(capped, { maxDimension, targetMaxBytes });
+    } finally {
+      closeBitmap(capped);
+    }
   }
 }
 
@@ -389,14 +440,22 @@ export async function prepareCompressedBlob(
   blob: Blob,
   opts: { maxDimension?: number; targetMaxBytes?: number } = {}
 ): Promise<PreparedBlobEntry> {
-  const image = await loadBitmap(blob);
+  const maxDimension = opts.maxDimension ?? ANALYSIS_MAX_DIMENSION;
+  const targetMaxBytes = opts.targetMaxBytes ?? IMAGE_MAX_BYTES;
   try {
-    return await encodeBlobFromBitmap(image, {
-      maxDimension: opts.maxDimension ?? ANALYSIS_MAX_DIMENSION,
-      targetMaxBytes: opts.targetMaxBytes ?? IMAGE_MAX_BYTES,
-    });
-  } finally {
-    closeBitmap(image);
+    const image = await loadBitmap(blob);
+    try {
+      return await encodeBlobFromBitmap(image, { maxDimension, targetMaxBytes });
+    } finally {
+      closeBitmap(image);
+    }
+  } catch {
+    const capped = await loadBitmap(blob, maxDimension);
+    try {
+      return await encodeBlobFromBitmap(capped, { maxDimension, targetMaxBytes });
+    } finally {
+      closeBitmap(capped);
+    }
   }
 }
 

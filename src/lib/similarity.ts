@@ -27,7 +27,10 @@ async function decodeSource(src: string | Blob): Promise<
     if (bitmap.width > 0 && bitmap.height > 0) return bitmap;
     (bitmap as ImageBitmap).close();
   } catch {
-    // Fall through to the <img> loader below.
+    // Fall to the <img> loader below, but only where Image actually exists.
+  }
+  if (typeof Image === "undefined" || typeof document === "undefined") {
+    throw new Error("This environment cannot decode images for the similarity check.");
   }
   const url = typeof URL.createObjectURL === "function"
     ? URL.createObjectURL(blob)
@@ -51,10 +54,15 @@ export async function perceptualHashes(src: string | Blob): Promise<HashPair> {
   try {
     const width = 8;
     const height = 8;
-    const canvas = document.createElement("canvas");
+    const canvas = typeof document === "undefined"
+      ? new OffscreenCanvas(width, height)
+      : document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const ctx = canvas.getContext("2d", { willReadFrequently: true }) as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null;
     if (!ctx) throw new Error("Canvas is unavailable for similarity checks.");
     ctx.drawImage(source as CanvasImageSource, 0, 0, width, height);
     const { data } = ctx.getImageData(0, 0, width, height);

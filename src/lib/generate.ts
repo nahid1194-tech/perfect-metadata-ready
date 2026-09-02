@@ -1,5 +1,4 @@
 import type {
-  ApiProvider,
   CsvFormat,
   GeneratedMetadata,
   GenerationResult,
@@ -999,22 +998,6 @@ async function getPreparedAnalysis(
 export async function prepareImage(image: ImageAsset): Promise<void> {
   await getPreparedAnalysis(image);
   await imageContentHash(image);
-}
-
-export function warmUpProvider(provider: ApiProvider): void {
-  try {
-    const base =
-      provider === "gemini"
-        ? API_BASE
-        : provider === "openai"
-          ? OPENAI_API_BASE
-          : MISTRAL_API_BASE;
-    void fetch(base, { method: "GET", cache: "no-store" }).catch(() => {
-      // Warm-up pings are best-effort; ignore failures.
-    });
-  } catch {
-    // Ignore warm-up failures.
-  }
 }
 
 async function runGenerationPipeline(args: {

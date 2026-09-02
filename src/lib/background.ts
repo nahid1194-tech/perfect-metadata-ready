@@ -16,11 +16,15 @@ const TRANSPARENT_RATIO = 0.5;
 const NEUTRAL_RATIO = 0.6;
 const SOLID_SPREAD = 26;
 
-const IS_WORKER =
-  typeof document === "undefined" && typeof window === "undefined";
+// True when running inside a Web Worker (no DOM). Prefer createImageBitmap so
+// the new Image() fallback is never reached where the Image constructor is
+// undefined.
+const CAN_DECODE_IN_WORKER =
+  typeof createImageBitmap === "function" &&
+  typeof Image === "undefined";
 
 function loadImage(src: string): Promise<HTMLImageElement | ImageBitmap> {
-  if (IS_WORKER) {
+  if (CAN_DECODE_IN_WORKER) {
     return (async () => {
       const blob = await (await fetch(src)).blob();
       return createImageBitmap(blob);
@@ -105,7 +109,7 @@ export async function detectBackground(
     const width = Math.max(1, Math.round(image.width * scale));
     const height = Math.max(1, Math.round(image.height * scale));
 
-    const canvas = IS_WORKER
+    const canvas = CAN_DECODE_IN_WORKER
       ? new OffscreenCanvas(width, height)
       : document.createElement("canvas");
     canvas.width = width;

@@ -36,7 +36,6 @@ import {
   testGeminiConnection,
   testMistralConnection,
   testOpenAIConnection,
-  warmUpProvider,
 } from "@/lib/generate";
 import {
   ensureModelCache,
@@ -758,7 +757,6 @@ export async function runQueue(
 
   if (hasApiKeys) {
     void ensureModelCache();
-    warmUpProvider(store.primaryProvider);
   }
 
   active = true;
@@ -965,7 +963,6 @@ export async function retryImage(imageId: string): Promise<void> {
 
   if (activeKeys(store.apiKeys).length > 0) {
     void ensureModelCache();
-    warmUpProvider(useAppStore.getState().primaryProvider);
   }
 
   active = true;

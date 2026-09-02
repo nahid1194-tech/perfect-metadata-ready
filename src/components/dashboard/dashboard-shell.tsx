@@ -54,6 +54,20 @@ export function DashboardShell() {
     void ensureModelCache();
   }, []);
 
+  useEffect(() => {
+    // Development-only: measure initial dashboard hydration time.
+    if (process.env.NODE_ENV === "production") return;
+    const t = performance.now();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const delta = performance.now() - t;
+        console.log(
+          `[Perf] dashboard interactive — ${delta.toFixed(0)}ms (route: ${window.location.pathname})`
+        );
+      });
+    });
+  }, []);
+
   useKeyboardShortcuts({
     onGenerate: () => run(),
     onRetry: () => {

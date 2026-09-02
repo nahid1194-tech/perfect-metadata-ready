@@ -17,7 +17,11 @@ import { createProfiler, logProfile } from "@/lib/perf";
 import type { ImageAsset } from "@/lib/types";
 
 const UPLOAD_CONCURRENCY = 4;
-const EPS_CONCURRENCY = 2;
+// EPS conversion is the most expensive off-main-thread operation (Ghostscript +
+// WASM). Run it at a concurrency of 1 by default and cap it at 2 so parallel
+// conversions never starve the browser or exhaust memory on large EPS files.
+const EPS_CONCURRENCY = 1;
+const EPS_CONCURRENCY_MAX = 2;
 
 const USE_AS_IS_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -135,7 +139,9 @@ async function optimizeAsset(
       useAppStore.getState().updateImage(asset.id, { epsStatus: "uploading" });
 
       profiler.start("render");
+      const tRenderStart = performance.now();
       const rendered = await renderVectorToPng(file);
+      const renderMs = performance.now() - tRenderStart;
       profiler.end("render");
 
       useAppStore.getState().updateImage(asset.id, { epsStatus: "converting" });
@@ -161,8 +167,16 @@ async function optimizeAsset(
 
       logProfile(`${asset.name}:upload`, profiler.result());
       console.log(
-        `[Upload] ${asset.name}: EPS→PNG→Blob in ${(performance.now() - t0).toFixed(0)}ms (blob=${formatBytes(compressed.blob.size)})`
+        `[Upload] ${asset.name}: EPS→PNG→Blob in ${(performance.now() - t0).toFixed(0)}ms (render=${renderMs.toFixed(0)}ms blob=${formatBytes(compressed.blob.size)})`
       );
+      if (process.env.NODE_ENV !== "production") {
+        const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+        console.log(
+          `[Perf] EPS converted: render=${renderMs.toFixed(0)}ms compress=${
+            profiler.result().compress ?? 0
+          }ms heap=${mem ? (mem.usedJSHeapSize / 1048576).toFixed(1) + "MB" : "n/a"}`
+        );
+      }
       return {
         failure: null,
         patch: {
@@ -313,7 +327,7 @@ export async function processAssetsForAnalysis(
   const processEps = async () => {
     let nextIndex = 0;
     const workers = Array.from(
-      { length: Math.min(EPS_CONCURRENCY, epsAssets.length) },
+      { length: Math.min(EPS_CONCURRENCY, EPS_CONCURRENCY_MAX, epsAssets.length) },
       async () => {
         for (;;) {
           const index = nextIndex++;

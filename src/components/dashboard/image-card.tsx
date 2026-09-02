@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useState } from "react"
+import { lazy, memo, Suspense, useState } from "react"
 import { motion } from "framer-motion"
 import { ChevronDown, FileImage, Loader2, Maximize2, RefreshCw, ShieldAlert, Trash2 } from "lucide-react"
 
@@ -41,10 +41,17 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { ImagePreviewModal } from "@/components/dashboard/image-preview-modal"
 import { useGenerate } from "@/hooks/use-generate"
 import { useAppStore } from "@/store/use-app-store"
 import { toast } from "@/store/use-toast-store"
+
+// The fullscreen preview only mounts when the user clicks "Preview"; keep its
+// code out of the initial dashboard bundle until it is actually needed.
+const ImagePreviewModal = lazy(() =>
+  import("@/components/dashboard/image-preview-modal").then((m) => ({
+    default: m.ImagePreviewModal,
+  }))
+);
 
 function qualityColor(score: number): string {
   if (score >= 90) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
@@ -504,12 +511,14 @@ export const ImageCard = memo(function ImageCard({ result }: { result: Generatio
     </motion.article>
 
     {previewOpen && previewSrc ? (
-      <ImagePreviewModal
-        src={previewSrc}
-        isVideo={previewIsVideo}
-        alt={result.imageName}
-        onClose={() => setPreviewOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <ImagePreviewModal
+          src={previewSrc}
+          isVideo={previewIsVideo}
+          alt={result.imageName}
+          onClose={() => setPreviewOpen(false)}
+        />
+      </Suspense>
     ) : null}
   </>
   );

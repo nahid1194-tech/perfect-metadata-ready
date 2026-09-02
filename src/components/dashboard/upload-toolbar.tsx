@@ -3,10 +3,7 @@
 import { useEffect, useState } from "react"
 import { Download, Loader2, RotateCcw, Square, Trash2, UploadCloud, WandSparkles } from "lucide-react"
 
-import { exportAdobeCsv, exportMagnificCsv, exportShutterstockCsv, fixMagnificMetadata, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
-import { pushToGitHub } from "@/lib/git-sync"
 import { marketplaceFormat, marketplaceLabel } from "@/lib/marketplace"
-import { validateMetadata, validateResults } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useGenerate } from "@/hooks/use-generate"
@@ -112,7 +109,18 @@ export function UploadToolbar() {
       toast("error", "Nothing to export", "Generate metadata first.");
       return;
     }
+    // Load the CSV/export code on demand so it is not part of the initial
+    // dashboard bundle.
     const format = marketplaceFormat(platform);
+    const {
+      exportAdobeCsv,
+      exportMagnificCsv,
+      exportShutterstockCsv,
+      fixMagnificMetadata,
+      fixShutterstockMetadata,
+      resolveExportFilenames,
+    } = await import("@/lib/export");
+    const { validateMetadata, validateResults } = await import("@/lib/validation");
     if (format === "adobe") {
       const errors = validateResults(results, "adobe");
       if (errors.length > 0) {
@@ -212,6 +220,7 @@ export function UploadToolbar() {
     }
     setPushing(true);
     try {
+      const { pushToGitHub } = await import("@/lib/git-sync");
       const result = await pushToGitHub();
       toast(
         result.ok ? "success" : "error",

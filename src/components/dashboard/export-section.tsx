@@ -4,8 +4,6 @@
 import { useState } from "react"
 import { Download, FileSpreadsheet, Image } from "lucide-react"
 
-import { exportAdobeCsv, exportMagnificCsv, exportShutterstockCsv, fixMagnificMetadata, fixShutterstockMetadata, resolveExportFilenames } from "@/lib/export"
-import { validateMetadata, validateResults } from "@/lib/validation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/store/use-app-store"
@@ -19,6 +17,18 @@ export function ExportSection() {
     if (results.length === 0) return;
     setExporting(format);
     try {
+      // Lazy-load the CSV/export code so it is not part of the initial bundle.
+      const {
+        exportAdobeCsv,
+        exportMagnificCsv,
+        exportShutterstockCsv,
+        fixMagnificMetadata,
+        fixShutterstockMetadata,
+        resolveExportFilenames,
+      } = await import("@/lib/export");
+      const { validateMetadata, validateResults } = await import(
+        "@/lib/validation"
+      );
       if (format === "adobe") {
         const errors = validateResults(results, "adobe");
         if (errors.length > 0) {

@@ -1,16 +1,25 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { ChevronDown, KeyRound, Sparkles, Zap, Clock, AlertTriangle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { bestModelFor } from "@/lib/models"
 import type { ApiProvider } from "@/lib/types"
-import { ApiKeySettings } from "@/components/dashboard/api-key-settings"
 import { ThemeToggle } from "@/components/layout/theme-toggle"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useAppStore } from "@/store/use-app-store"
+
+// The API key panel pulls in the heavy key-health + connection-testing code
+// (network requests, key rotation logic). Keep it out of the initial bundle and
+// load it only when the user actually opens the API Keys section.
+const ApiKeySettings = lazy(() =>
+  import("@/components/dashboard/api-key-settings").then((m) => ({
+    default: m.ApiKeySettings,
+  }))
+);
 
 const PROVIDER_LABEL: Record<ApiProvider, string> = {
   gemini: "Gemini",
@@ -298,7 +307,17 @@ export function ControlCard() {
 
       {keysOpen ? (
         <div className="rounded-xl border bg-background/60 p-3">
-          <ApiKeySettings />
+          <Suspense
+            fallback={
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-12 w-full rounded-lg" />
+                <Skeleton className="h-8 w-full rounded-lg" />
+                <Skeleton className="h-8 w-full rounded-lg" />
+              </div>
+            }
+          >
+            <ApiKeySettings />
+          </Suspense>
         </div>
       ) : null}
     </div>

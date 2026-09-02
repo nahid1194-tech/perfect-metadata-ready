@@ -1,4 +1,3 @@
-import { buildAdobeCsv, buildShutterstockCsv } from "@/lib/export";
 import type {
   GenerationResult,
   GitPushFile,
@@ -19,6 +18,9 @@ function buildErrorResult(error: unknown, changed = false): GitPushResult {
 export async function buildCsvFiles(
   results: GenerationResult[]
 ): Promise<GitPushFile[]> {
+  // Lazy-load the CSV builders so the export/papaparse code is only fetched
+  // when the user actually pushes to GitHub.
+  const { buildAdobeCsv, buildShutterstockCsv } = await import("@/lib/export");
   const [adobeCsv, shutterstockCsv] = await Promise.all([
     buildAdobeCsv(results),
     buildShutterstockCsv(results),
